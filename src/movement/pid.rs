@@ -1,13 +1,13 @@
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct PidConfig {
     /// how strongly to correct current error
-    kp: f64,
+    kp: f32,
     
     /// how strongly to correct to long term drift
-    ki: f64,
+    ki: f32,
 
     /// how strongly to correct to predicted error
-    kd: f64,
+    kd: f32,
 }
 
 /// Implementation of PID algorithm
@@ -15,8 +15,8 @@ pub struct PidConfig {
 pub struct PidController {
     pid: PidConfig,
 
-    integral: f64,
-    last_error: f64
+    integral: f32,
+    last_error: f32
 }
 
 impl PidController {
@@ -25,7 +25,7 @@ impl PidController {
     }
 
     // TODO could this be improved with knowledge of the duration of the time step?
-    pub fn pid(&mut self, error: f64) -> f64 {
+    pub fn update(&mut self, error: f32) -> f32 {
         self.integral += error;
 
         let cfg = &self.pid;

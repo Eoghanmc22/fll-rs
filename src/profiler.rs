@@ -115,8 +115,8 @@ impl Profiler {
     }
 
     fn report_0(node: &Node, depth: usize) {
-        let x = node.frame.duration.as_secs_f64() * 1000.0;
-        eprintln!("{}{} took {} ms over {} calls (avg. {} ms)", "\t".repeat(depth), node.frame.name, x, node.frame.count, x / node.frame.count as f64);
+        let x = node.frame.duration.as_secs_f32() * 1000.0;
+        eprintln!("{}{} took {} ms over {} calls (avg. {} ms)", "\t".repeat(depth), node.frame.name, x, node.frame.count, x / node.frame.count as f32);
 
         for entry in node.children.iter() {
             Profiler::report_0(entry.1, depth + 1);

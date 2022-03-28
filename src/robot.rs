@@ -1,3 +1,5 @@
+use std::error::Error;
+
 /// How the robot should turn
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum TurnType {
@@ -11,13 +13,29 @@ pub enum TurnType {
     Center
 }
 
+impl TurnType {
+    pub fn wheels(&self) -> (bool, bool) {
+        match self {
+            TurnType::Right => {
+                (false, true)
+            }
+            TurnType::Left => {
+                (true, false)
+            }
+            TurnType::Center => {
+                (true, true)
+            }
+        }
+    }
+}
+
 /// Identifies a motor
 #[derive(Eq, PartialEq, Copy, Clone, Hash, Debug)]
 pub enum Motor {
     DriveRight,
     DriveLeft,
     AttachmentRight,
-    AttachmentLeft,
+    AttachmentLeft
 }
 
 /// A motor movement
@@ -28,7 +46,7 @@ pub enum Command {
     On(i32),
 
     /// Stop spinning
-    Off,
+    Stop(StopAction),
 
     /// Spin for a set distance
     /// Takes distance and speed params
@@ -36,8 +54,26 @@ pub enum Command {
 
     /// Spin for a set time
     /// Takes time (seconds) and speed params
-    Time(f32, i32)
+    Time(f32, i32),
+
+    /// Sets the motor's target speed
+    /// Useful for algorithms that need to dynamically adjust the motors speed
+    /// Takes speed param
+    Direct(i32)
 }
+
+/// A Stop Action
+#[derive(Copy, Clone, Debug)]
+pub enum StopAction {
+    /// Freely coast to a stop
+    Coast,
+    /// Cause motors to stop more quickly than `Coast` but without holding its position
+    Break,
+    /// Actively holds a motor's position
+    Hold
+}
+
+pub type RobotError = Box<dyn Error>;
 
 /// Represents a simple robot with 2 wheels to move and a method to sense direction
 pub trait Robot {
@@ -45,11 +81,29 @@ pub trait Robot {
     fn facing(&self) -> f32;
 
     /// Drive the robot straight
-    fn drive(&self, distance: i32, speed: i32);
+    ///
+    /// # Returns
+    ///
+    /// Returns an error if an interrupt has been requested
+    /// Otherwise, returns Ok(())
+    ///
+    /// # Panics
+    ///
+    /// This function may panic if `distance` or `speed` equal 0
+    fn drive(&self, distance: i32, speed: i32) -> Result<(), RobotError>;
 
     /// Turns the robot
-    /// Guesses the turn type from the new target angle
-    fn turn(&self, angle: f32, speed: i32);
+    /// Guesses the turn type from the turn direction
+    ///
+    /// # Returns
+    ///
+    /// Returns an error if an interrupt has been requested
+    /// Otherwise, returns Ok(())
+    ///
+    /// # Panics
+    ///
+    /// This function may panic if `speed` is less than or equal to 0
+    fn turn(&self, angle: f32, speed: i32) -> Result<(), RobotError>;
 
     /// Turns the robot
     /// Uses specified turn type
@@ -65,12 +119,21 @@ pub trait Robot {
     fn speed(&self, motor: Motor) -> i32;
 
     /// Retrieves the angle of a motor
-    fn motor_angle(&self, motor: Motor, actual: bool) -> i32;
+    fn motor_angle(&self, motor: Motor) -> i32;
 
     /// Resets the angle of a motor to 0
-    fn motor_reset(&self, motor: Motor) -> i32;
+    /// this method sets the stopping action for implicit stops
+    fn motor_reset(&self, motor: Motor, stopping_action: Option<StopAction>) -> i32;
 
     /// Resets the robot
     /// Should panic if called during a mission
     fn reset(&self);
+
+    /// Retrieves the battery percentage
+    /// Ranges from 0.0 -> 1.0
+    fn battery(&self) -> f32;
+
+    /// Returns an error if an interrupt has been requested
+    /// Otherwise, returns Ok(())
+    fn handle_interrupt(&self) -> Result<(), RobotError>;
 }

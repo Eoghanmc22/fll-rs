@@ -1,25 +1,35 @@
+use std::time::Instant;
+
 pub struct TrapezoidalAcceleration {
-    acceleration: f64,
-    deceleration: f64,
+    acceleration: f32,
+    deceleration: f32,
 
-    target_speed: f64,
-    total_distance: f64,
-    total_duration: f64,
+    target_speed: f32,
+    total_distance: f32,
+    total_duration: f32,
 
-    acceleration_end: f64,
-    const_end: f64,
-    deceleration_end: f64,
+    acceleration_end: f32,
+    const_end: f32,
+    deceleration_end: f32,
 
     solved: bool
 }
 
-const MIN_SPEED : f64 = 100.0;
-const STOPPING_DURATION: f64 = 0.25;
-const STOPPING_LENGTH: f64 = STOPPING_DURATION * MIN_SPEED;
+pub enum AccelerationPhase {
+    RampUp,
+    Constant,
+    RampDown,
+    Stopping,
+    Illegal
+}
+
+const MIN_SPEED : f32 = 100.0;
+const STOPPING_DURATION: f32 = 0.25;
+const STOPPING_LENGTH: f32 = STOPPING_DURATION * MIN_SPEED;
 
 impl TrapezoidalAcceleration {
     /// Generates a new acceleration curve
-    pub fn new(total_distance: f64, target_speed: f64, acceleration: f64, deceleration: f64) -> Self {
+    pub fn new(total_distance: f32, target_speed: f32, acceleration: f32, deceleration: f32) -> Self {
         assert!(total_distance >= 0.0, "total_distance must be greater than 0");
         assert!(target_speed >= 0.0, "target_speed must be greater than 0");
         assert!(acceleration >= 0.0, "acceleration must be greater than 0");
@@ -93,43 +103,51 @@ impl TrapezoidalAcceleration {
         }
     }
 
+    pub fn now(&self, start: Instant) -> (f32, AccelerationPhase) {
+        let time_since_start = start.elapsed().as_secs_f32();
+        self.eval(time_since_start)
+    }
+
     /// Gets the speed form the acceleration curve at the current time
-    pub fn get_speed(&self, time: f64) -> f64 {
+    pub fn eval(&self, time: f32) -> (f32, AccelerationPhase) {
         if self.target_speed <= MIN_SPEED {
             // The acceleration curve is not defined for the requested parameters
-            return MIN_SPEED;
+            return (MIN_SPEED, AccelerationPhase::Stopping);
         }
 
         if time < 0.0 {
             // Backup definition for illegal inputs
-            MIN_SPEED
+            (MIN_SPEED, AccelerationPhase::Illegal)
         } else if time < self.acceleration_end {
             // Acceleration
-            self.acceleration * time + MIN_SPEED
+            (self.acceleration * time + MIN_SPEED, AccelerationPhase::RampUp)
         } else if time < self.const_end {
             // Constant
-            self.target_speed
+            (self.target_speed, AccelerationPhase::Constant)
         } else if time < self.deceleration_end {
             // Deceleration
-            self.target_speed - self.deceleration * (time - self.const_end)
+            (self.target_speed - self.deceleration * (time - self.const_end), AccelerationPhase::RampDown)
+        } else if time < self.total_duration {
+            // Stopping
+            (MIN_SPEED, AccelerationPhase::Stopping)
         } else {
-            // Stopping and other illegal inputs
-            MIN_SPEED
+            // Backup definition for illegal inputs
+            (MIN_SPEED, AccelerationPhase::Illegal)
         }
     }
 
     // The distance this acceleration curve covers
-    pub fn distance(&self) -> f64 {
+    pub fn distance(&self) -> f32 {
         self.total_distance
     }
 
     // The time this acceleration curve takes to run
-    pub fn duration(&self) -> f64 {
+    pub fn duration(&self) -> f32 {
         self.total_duration
     }
 
     // The target_speed of this acceleration curve
-    pub fn target_speed(&self) -> f64 {
+    pub fn target_speed(&self) -> f32 {
         self.target_speed
     }
 
@@ -139,15 +157,15 @@ impl TrapezoidalAcceleration {
         self.solved
     }
 
-    pub fn min_speed() -> f64 {
+    pub fn min_speed() -> f32 {
         MIN_SPEED
     }
 
-    pub fn stopping_duration() -> f64 {
+    pub fn stopping_duration() -> f32 {
         STOPPING_DURATION
     }
 
-    pub fn stopping_length() -> f64 {
+    pub fn stopping_length() -> f32 {
         STOPPING_LENGTH
     }
 }

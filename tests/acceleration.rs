@@ -17,10 +17,10 @@ fn acceleration_test() {
     }
 }
 
-const TIME_STEP: f64 = 0.001;
-const ELISION: f64 = 0.001;
+const TIME_STEP: f32 = 0.001;
+const ELISION: f32 = 0.001;
 
-fn simulate(distance: f64, speed: f64, acceleration: f64, deceleration: f64) {
+fn simulate(distance: f32, speed: f32, acceleration: f32, deceleration: f32) {
     println!("Curve dist: {}, speed: {}, acceleration: {}, deceleration: {}", distance, speed, acceleration, deceleration);
 
     let acceleration_curve = TrapezoidalAcceleration::new(distance, speed, acceleration, deceleration);
@@ -38,10 +38,10 @@ fn simulate(distance: f64, speed: f64, acceleration: f64, deceleration: f64) {
     let mut duration = 0.0;
 
     let mut last_speed = TrapezoidalAcceleration::min_speed();
-    let threshold = f64::max(acceleration * TIME_STEP, deceleration * TIME_STEP) + ELISION;
+    let threshold = f32::max(acceleration * TIME_STEP, deceleration * TIME_STEP) + ELISION;
 
     while pos < distance {
-        let speed = acceleration_curve.get_speed(duration);
+        let speed = acceleration_curve.eval(duration).0;
         pos += speed * TIME_STEP;
 
         duration += TIME_STEP;

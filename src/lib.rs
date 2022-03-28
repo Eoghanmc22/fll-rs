@@ -4,6 +4,7 @@ pub mod menu;
 pub mod graphics;
 pub mod profiler;
 pub mod movement;
+pub mod lego;
 
 #[cfg(test)]
 mod tests {
