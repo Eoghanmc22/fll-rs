@@ -48,9 +48,13 @@ pub enum Command {
     /// Stop spinning
     Stop(StopAction),
 
-    /// Spin for a set distance
+    /// Spin for a set distance (relative)
     /// Takes distance and speed params
     Distance(i32, i32),
+
+    /// Spin to a set angle (absolute)
+    /// Takes distance and speed params
+    To(i32, i32),
 
     /// Spin for a set time
     /// Takes time (seconds) and speed params
@@ -58,7 +62,7 @@ pub enum Command {
 
     /// Sets the motor's target speed
     /// Useful for algorithms that need to dynamically adjust the motors speed
-    /// Takes speed param
+    /// Takes duty cycle param (-100 - 100 percent power)
     Direct(i32)
 }
 
@@ -73,7 +77,7 @@ pub enum StopAction {
     Hold
 }
 
-pub type RobotError = Box<dyn Error>;
+pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
 /// Represents a simple robot with 2 wheels to move and a method to sense direction
 pub trait Robot {
@@ -90,7 +94,7 @@ pub trait Robot {
     /// # Panics
     ///
     /// This function may panic if `distance` or `speed` equal 0
-    fn drive(&self, distance: i32, speed: i32) -> Result<(), RobotError>;
+    fn drive(&self, distance: i32, speed: i32) -> Result<()>;
 
     /// Turns the robot
     /// Guesses the turn type from the turn direction
@@ -103,14 +107,14 @@ pub trait Robot {
     /// # Panics
     ///
     /// This function may panic if `speed` is less than or equal to 0
-    fn turn(&self, angle: f32, speed: i32) -> Result<(), RobotError>;
+    fn turn(&self, angle: i32, speed: i32) -> Result<()>;
 
     /// Turns the robot
     /// Uses specified turn type
-    fn turn_named(&self, angle: f32, speed: i32, turn: TurnType);
+    fn turn_named(&self, angle: i32, speed: i32, turn: TurnType) -> Result<()>;
 
     /// Moves a motor
-    fn motor(&self, motor: Motor, movement: Command, wait: bool);
+    fn motor(&self, motor: Motor, movement: Command);
 
     /// Waits until a motor is finished moving
     fn wait(&self, motor: Motor);
@@ -123,7 +127,7 @@ pub trait Robot {
 
     /// Resets the angle of a motor to 0
     /// this method sets the stopping action for implicit stops
-    fn motor_reset(&self, motor: Motor, stopping_action: Option<StopAction>) -> i32;
+    fn motor_reset(&self, motor: Motor, stopping_action: Option<StopAction>);
 
     /// Resets the robot
     /// Should panic if called during a mission
@@ -135,5 +139,5 @@ pub trait Robot {
 
     /// Returns an error if an interrupt has been requested
     /// Otherwise, returns Ok(())
-    fn handle_interrupt(&self) -> Result<(), RobotError>;
+    fn handle_interrupt(&self) -> Result<()>;
 }

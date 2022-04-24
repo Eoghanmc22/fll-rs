@@ -1,13 +1,13 @@
 #[derive(Copy, Clone, Debug)]
 pub struct PidConfig {
     /// how strongly to correct current error
-    kp: f32,
+    pub kp: f32,
     
     /// how strongly to correct to long term drift
-    ki: f32,
+    pub ki: f32,
 
     /// how strongly to correct to predicted error
-    kd: f32,
+    pub kd: f32,
 }
 
 /// Implementation of PID algorithm

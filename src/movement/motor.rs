@@ -2,9 +2,9 @@ use std::f32::consts::PI;
 use std::thread;
 use std::time::{Duration, Instant};
 use crate::math;
-use crate::movement::acceleration::{AccelerationPhase, TrapezoidalAcceleration};
+use crate::movement::acceleration::{TrapezoidalAcceleration};
 use crate::movement::pid::{PidConfig, PidController};
-use crate::robot::{Command, Motor, Robot, RobotError, StopAction, TurnType};
+use crate::robot::{Command, Motor, Robot, Result, StopAction, TurnType};
 
 /// The standard implementation of movement
 pub struct MovementController {
@@ -14,7 +14,7 @@ pub struct MovementController {
     spec: RobotSpec
 }
 
-impl<> MovementController<> {
+impl MovementController {
     pub fn new(pid_config: PidConfig, spec: RobotSpec) -> Self {
         MovementController {
             pid_config,
@@ -23,13 +23,13 @@ impl<> MovementController<> {
         }
     }
 
-    pub fn drive(&mut self, robot: &dyn Robot, distance: i32, speed: i32) -> Result<(), RobotError> {
+    pub fn drive(&self, robot: &dyn Robot, distance: i32, speed: i32) -> Result<()> {
         let spec = &self.spec;
         let current_max_speed = spec.max_speed() * robot.battery() - 100.0;
 
         let sign = (distance.signum() * speed.signum()) as f32 * spec.gear_ratio().signum();
         let distance = distance.abs() as f32;
-        let speed = math::clampf(speed.abs() as f32, current_max_speed, -current_max_speed);
+        let speed = math::clampf(speed.abs() as f32, -current_max_speed, current_max_speed);
 
         // Would take infinite or zero time to complete
         assert_ne!(sign, 0.0, "Illegal parameters!");
@@ -40,8 +40,8 @@ impl<> MovementController<> {
         let mut pid = PidController::new(self.pid_config);
 
         // Setup motors
-        robot.motor_reset(Motor::DriveRight, None);
-        robot.motor_reset(Motor::DriveLeft, None);
+        robot.motor_reset(Motor::DriveRight, Some(StopAction::Hold));
+        robot.motor_reset(Motor::DriveLeft, Some(StopAction::Hold));
 
         // Record the start time for acceleration
         let start = Instant::now();
@@ -57,31 +57,34 @@ impl<> MovementController<> {
             // Use correction from the PID controller to create per wheel speed
             let (speed_left, speed_right) = {
                 let speed_right = speed - speed * correction / 50.0;
-                let speed_right = math::clampf(speed_right, current_max_speed, -current_max_speed);
+                let speed_right = math::clampf(speed_right, -current_max_speed, current_max_speed);
 
                 let speed_left = speed + speed * correction / 50.0;
-                let speed_left = math::clampf(speed_left, current_max_speed, -current_max_speed);
+                let speed_left = math::clampf(speed_left, -current_max_speed, current_max_speed);
 
                 (speed_left, speed_right)
             };
 
-            robot.motor(Motor::DriveRight, Command::Direct((speed_right * sign) as i32), false);
-            robot.motor(Motor::DriveLeft, Command::Direct((speed_left * sign) as i32), false);
+            robot.motor(Motor::DriveRight, Command::To((distance * spec.error_wheel_right() * sign) as i32, speed_right as i32));
+            robot.motor(Motor::DriveLeft, Command::To((distance * spec.error_wheel_left() * sign) as i32, speed_left as i32));
 
             robot.handle_interrupt()?;
 
             // TODO tune
+            // Maybe change to yield with temporal adjustments for pid and stuff
             thread::sleep(Duration::from_millis(10))
         }
 
-        robot.motor(Motor::DriveRight, Command::Stop(StopAction::Hold), false);
-        robot.motor(Motor::DriveLeft, Command::Stop(StopAction::Hold), false);
+        robot.wait(Motor::DriveRight);
+        robot.wait(Motor::DriveLeft);
+
+        // Implicit Hold stop
 
         Ok(())
     }
 
-    pub fn turn(&self, robot: &dyn Robot, angle: f32, speed: i32) -> Result<(), RobotError> {
-        let difference = math::subtract_angles(angle, self.target_direction);
+    pub fn turn(&self, robot: &dyn Robot, angle: i32, speed: i32) -> Result<()> {
+        let difference = math::subtract_angles(angle as f32, self.target_direction);
 
         let turn_type = if difference < 0.0 {
             TurnType::Right
@@ -93,7 +96,7 @@ impl<> MovementController<> {
     }
 
     // Has a lot in common with drive, could they be merged?
-    pub fn turn_named(&self, robot: &dyn Robot, angle: f32, speed: i32, turn: TurnType) -> Result<(), RobotError> {
+    pub fn turn_named(&self, robot: &dyn Robot, angle: i32, speed: i32, turn: TurnType) -> Result<()> {
         assert!(speed > 0, "Speed must be greater than 0");
 
         let spec = &self.spec;
@@ -101,7 +104,7 @@ impl<> MovementController<> {
 
         // Calculate how much the wheels need to move for this turn
         // Abs angle -> Rel angle -> distance -> left and right degrees
-        let difference = math::subtract_angles(angle, robot.facing());
+        let difference = math::subtract_angles(angle as f32, robot.facing());
         let distance = spec.get_distance_for_turn(difference);
         let (dist_left, dist_right) = turn_split(&turn, distance, spec);
 
@@ -112,7 +115,7 @@ impl<> MovementController<> {
 
         let sign = distance.signum() * spec.gear_ratio().signum();
         let distance = distance.abs();
-        let speed = math::clampf(speed as f32, current_max_speed, -current_max_speed);
+        let speed = math::clampf(speed as f32, -current_max_speed, current_max_speed);
 
         // Generate the acceleration curve
         let acceleration = TrapezoidalAcceleration::new(distance, speed, spec.acceleration(), spec.deceleration());
@@ -126,38 +129,18 @@ impl<> MovementController<> {
 
         while position(robot, turn.wheels()) < distance {
             // Get position on acceleration curve
-            let (speed, phase) = acceleration.now(start);
-
-            // run_abs is more reliable position wise
-            // However run_direct is more reliable speed wise
-            match phase {
-                AccelerationPhase::Stopping |
-                AccelerationPhase::Illegal => {
-                    break;
-                }
-                _ => {}
-            }
+            let speed = acceleration.now(start).0;
 
             let (speed_left, speed_right) = turn_split(&turn, speed, spec);
 
-            // Move the length of the acceleration curve using run_direct for less lateral movement
-            if dist_right != 0.0 && speed_right != 0.0 { robot.motor(Motor::DriveRight, Command::Direct((speed_right * sign) as i32), false); }
-            if dist_left != 0.0 && speed_left != 0.0 { robot.motor(Motor::DriveLeft, Command::Direct((speed_left * sign) as i32), false); }
+            if dist_right != 0.0 && speed_right != 0.0 { robot.motor(Motor::DriveRight, Command::To((dist_right * sign) as i32, speed_right as i32)); }
+            if dist_left != 0.0 && speed_left != 0.0 { robot.motor(Motor::DriveLeft, Command::To((dist_left * sign) as i32, speed_left as i32)); }
 
             robot.handle_interrupt()?;
 
             // TODO tune
             thread::sleep(Duration::from_millis(10))
         }
-
-        let (speed_left, speed_right) = turn_split(&turn, TrapezoidalAcceleration::min_speed(), spec);
-
-        // Move the length of the stopping phase using run_abs for better direction accuracy
-        if dist_right != 0.0 && speed_right != 0.0 { robot.motor(Motor::DriveRight, Command::Distance(dist_right as i32, speed_right as i32), false); }
-        if dist_left != 0.0 && speed_left != 0.0 { robot.motor(Motor::DriveLeft, Command::Distance(dist_left as i32, speed_left as i32), false); }
-
-        robot.wait(Motor::DriveRight);
-        robot.wait(Motor::DriveLeft);
 
         // Implicit Hold stop
 
@@ -199,12 +182,14 @@ fn turn_split(turn_type: &TurnType, val: f32, spec: &RobotSpec) -> (f32, f32) {
     }
 }
 
+#[derive(Clone)]
 pub struct RobotSpec {
     acceleration: f32,
     deceleration: f32,
 
     gear_ratio: f32,
     wheel_circumference: f32,
+    wheel_diameter: f32,
     wheel_right_circumference: f32,
     wheel_left_circumference: f32,
     wheelbase_circumference: f32,
@@ -244,6 +229,7 @@ impl RobotSpec {
             deceleration,
             gear_ratio,
             wheel_circumference,
+            wheel_diameter,
             wheel_right_circumference,
             wheel_left_circumference,
             wheelbase_circumference,
@@ -278,6 +264,12 @@ impl RobotSpec {
     /// In millimeters
     pub fn wheel_circumference(&self) -> f32 {
         self.wheel_circumference
+    }
+
+    /// The diameter of the main wheels on the robot
+    /// In millimeters
+    pub fn wheel_diameter(&self) -> f32 {
+        self.wheel_diameter
     }
 
     /// The turning circumference of the robot's wheelbase
