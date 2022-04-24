@@ -1,3 +1,4 @@
 pub mod acceleration;
-pub mod motor;
+pub mod spec;
 pub mod pid;
+pub mod controller;
