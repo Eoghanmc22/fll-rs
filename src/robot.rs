@@ -1,4 +1,4 @@
-use crate::Result;
+use anyhow::Result;
 
 /// How the robot should turn
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
@@ -37,7 +37,7 @@ pub enum Motor {
     AttachmentRight,
     AttachmentLeft
 }
-
+// todo support set-points
 /// A motor movement
 #[derive(Copy, Clone, Debug)]
 pub enum Command {
