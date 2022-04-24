@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use ev3dev_lang_rust::Ev3Error;
 
@@ -23,7 +22,7 @@ pub type Result<T> = std::result::Result<T, FLLError>;
 
 #[derive(Debug)]
 pub enum FLLError {
-    StdError(Box<dyn Error + Send + Sync>),
+    StdError(Box<dyn std::error::Error + Send + Sync>),
     Ev3Error {
         device: String,
         info: String
@@ -36,8 +35,8 @@ impl Display for FLLError {
     }
 }
 
-impl Error for FLLError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+impl std::error::Error for FLLError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             FLLError::StdError(error) => {
                 Some(&**error)
@@ -49,8 +48,8 @@ impl Error for FLLError {
     }
 }
 
-impl From<Box<dyn Error + Send + Sync>> for FLLError {
-    fn from(err: Box<dyn Error + Send + Sync>) -> Self {
+impl From<Box<dyn std::error::Error + Send + Sync>> for FLLError {
+    fn from(err: Box<dyn std::error::Error + Send + Sync>) -> Self {
         FLLError::StdError(err)
     }
 }

@@ -1,3 +1,5 @@
+use crate::Result;
+
 /// How the robot should turn
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum TurnType {
@@ -78,7 +80,7 @@ pub enum StopAction {
 /// Represents a simple robot with 2 wheels to move and a method to sense direction
 pub trait Robot {
     /// Retrieve the robot's current heading.
-    fn facing(&self) -> f32;
+    fn facing(&self) -> Result<f32>;
 
     /// Drive the robot straight
     ///
@@ -90,7 +92,7 @@ pub trait Robot {
     /// # Panics
     ///
     /// This function may panic if `distance` or `speed` equal 0
-    fn drive(&self, distance: i32, speed: i32) -> crate::Result<()>;
+    fn drive(&self, distance: i32, speed: i32) -> Result<()>;
 
     /// Turns the robot
     /// Guesses the turn type from the turn direction
@@ -103,37 +105,37 @@ pub trait Robot {
     /// # Panics
     ///
     /// This function may panic if `speed` is less than or equal to 0
-    fn turn(&self, angle: i32, speed: i32) -> crate::Result<()>;
+    fn turn(&self, angle: i32, speed: i32) -> Result<()>;
 
     /// Turns the robot
     /// Uses specified turn type
-    fn turn_named(&self, angle: i32, speed: i32, turn: TurnType) -> crate::Result<()>;
+    fn turn_named(&self, angle: i32, speed: i32, turn: TurnType) -> Result<()>;
 
     /// Moves a motor
-    fn motor(&self, motor: Motor, movement: Command);
+    fn motor(&self, motor: Motor, movement: Command) -> Result<()>;
 
     /// Waits until a motor is finished moving
-    fn wait(&self, motor: Motor);
+    fn wait(&self, motor: Motor) -> Result<()>;
 
     /// Retrieves the speed of a motor
-    fn speed(&self, motor: Motor) -> i32;
+    fn speed(&self, motor: Motor) -> Result<i32>;
 
     /// Retrieves the angle of a motor
-    fn motor_angle(&self, motor: Motor) -> i32;
+    fn motor_angle(&self, motor: Motor) -> Result<i32>;
 
     /// Resets the angle of a motor to 0
     /// this method sets the stopping action for implicit stops
-    fn motor_reset(&self, motor: Motor, stopping_action: Option<StopAction>);
+    fn motor_reset(&self, motor: Motor, stopping_action: Option<StopAction>) -> Result<()>;
 
     /// Resets the robot
     /// Should panic if called during a mission
-    fn reset(&self);
+    fn reset(&self) -> Result<()>;
 
     /// Retrieves the battery percentage
     /// Ranges from 0.0 -> 1.0
-    fn battery(&self) -> f32;
+    fn battery(&self) -> Result<f32>;
 
     /// Returns an error if an interrupt has been requested
     /// Otherwise, returns Ok(())
-    fn handle_interrupt(&self) -> crate::Result<()>;
+    fn handle_interrupt(&self) -> Result<()>;
 }
