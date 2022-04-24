@@ -24,7 +24,7 @@ impl MovementController {
         }
     }
 
-    pub fn drive(&self, robot: &dyn Robot, distance: i32, speed: i32) -> Result<()> {
+    pub fn drive<R: Robot>(&self, robot: &R, distance: i32, speed: i32) -> Result<()> {
         let spec = &self.spec;
         let current_max_speed = spec.max_speed() * robot.battery()? - 100.0;
 
@@ -84,7 +84,7 @@ impl MovementController {
         Ok(())
     }
 
-    pub fn turn(&self, robot: &dyn Robot, angle: i32, speed: i32) -> Result<()> {
+    pub fn turn<R: Robot>(&self, robot: &R, angle: i32, speed: i32) -> Result<()> {
         let difference = math::subtract_angles(angle as f32, self.target_direction);
 
         let turn_type = if difference < 0.0 {
@@ -97,7 +97,7 @@ impl MovementController {
     }
 
     // Has a lot in common with drive, could they be merged?
-    pub fn turn_named(&self, robot: &dyn Robot, angle: i32, speed: i32, turn: TurnType) -> Result<()> {
+    pub fn turn_named<R: Robot>(&self, robot: &R, angle: i32, speed: i32, turn: TurnType) -> Result<()> {
         assert!(speed > 0, "Speed must be greater than 0");
 
         let spec = &self.spec;
@@ -149,7 +149,7 @@ impl MovementController {
     }
 }
 
-fn position(robot: &dyn Robot, wheels: (bool, bool)) -> Result<f32> {
+fn position<R: Robot>(robot: &R, wheels: (bool, bool)) -> Result<f32> {
     let mut sum = 0.0;
     let mut count = 0.0;
 
