@@ -1,5 +1,3 @@
-use std::error::Error;
-
 /// How the robot should turn
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum TurnType {
@@ -77,8 +75,6 @@ pub enum StopAction {
     Hold
 }
 
-pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
-
 /// Represents a simple robot with 2 wheels to move and a method to sense direction
 pub trait Robot {
     /// Retrieve the robot's current heading.
@@ -94,7 +90,7 @@ pub trait Robot {
     /// # Panics
     ///
     /// This function may panic if `distance` or `speed` equal 0
-    fn drive(&self, distance: i32, speed: i32) -> Result<()>;
+    fn drive(&self, distance: i32, speed: i32) -> crate::Result<()>;
 
     /// Turns the robot
     /// Guesses the turn type from the turn direction
@@ -107,11 +103,11 @@ pub trait Robot {
     /// # Panics
     ///
     /// This function may panic if `speed` is less than or equal to 0
-    fn turn(&self, angle: i32, speed: i32) -> Result<()>;
+    fn turn(&self, angle: i32, speed: i32) -> crate::Result<()>;
 
     /// Turns the robot
     /// Uses specified turn type
-    fn turn_named(&self, angle: i32, speed: i32, turn: TurnType) -> Result<()>;
+    fn turn_named(&self, angle: i32, speed: i32, turn: TurnType) -> crate::Result<()>;
 
     /// Moves a motor
     fn motor(&self, motor: Motor, movement: Command);
@@ -139,5 +135,5 @@ pub trait Robot {
 
     /// Returns an error if an interrupt has been requested
     /// Otherwise, returns Ok(())
-    fn handle_interrupt(&self) -> Result<()>;
+    fn handle_interrupt(&self) -> crate::Result<()>;
 }

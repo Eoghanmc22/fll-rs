@@ -1,10 +1,11 @@
 use std::thread;
 use std::time::{Duration, Instant};
 use crate::math;
-use crate::movement::acceleration::{TrapezoidalAcceleration};
+use crate::Result;
+use crate::movement::acceleration::TrapezoidalAcceleration;
 use crate::movement::pid::{PidConfig, PidController};
 use crate::movement::spec::RobotSpec;
-use crate::robot::{Command, Motor, Robot, Result, StopAction, TurnType};
+use crate::robot::{Command, Motor, Robot, StopAction, TurnType};
 
 /// The standard implementation of movement
 pub struct MovementController {
