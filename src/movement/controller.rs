@@ -66,8 +66,11 @@ impl MovementController {
                 (speed_left, speed_right)
             };
 
-            robot.motor(Motor::DriveRight, Command::To((distance * spec.error_wheel_right() * sign) as i32, speed_right as i32))?;
-            robot.motor(Motor::DriveLeft, Command::To((distance * spec.error_wheel_left() * sign) as i32, speed_left as i32))?;
+            robot.motor(Motor::DriveRight, Command::Queue(Command::To((distance * spec.error_wheel_right() * sign) as i32, speed_right as i32).into()))?;
+            robot.motor(Motor::DriveLeft, Command::Queue(Command::To((distance * spec.error_wheel_left() * sign) as i32, speed_left as i32).into()))?;
+
+            robot.motor(Motor::DriveRight, Command::Execute)?;
+            robot.motor(Motor::DriveLeft, Command::Execute)?;
 
             robot.handle_interrupt()?;
 
@@ -97,6 +100,7 @@ impl MovementController {
     }
 
     // Has a lot in common with drive, could they be merged?
+    // todo implement pid turns??
     pub fn turn_named<R: Robot>(&self, robot: &R, angle: i32, speed: i32, turn: TurnType) -> Result<()> {
         assert!(speed > 0, "Speed must be greater than 0");
 
@@ -134,8 +138,11 @@ impl MovementController {
 
             let (speed_left, speed_right) = turn_split(&turn, speed, spec);
 
-            if dist_right != 0.0 && speed_right != 0.0 { robot.motor(Motor::DriveRight, Command::To((dist_right * sign) as i32, speed_right as i32))?; }
-            if dist_left != 0.0 && speed_left != 0.0 { robot.motor(Motor::DriveLeft, Command::To((dist_left * sign) as i32, speed_left as i32))?; }
+            if dist_right != 0.0 && speed_right != 0.0 { robot.motor(Motor::DriveRight, Command::Queue(Command::To((dist_right * sign) as i32, speed_right as i32).into()))?; }
+            if dist_left != 0.0 && speed_left != 0.0 { robot.motor(Motor::DriveLeft, Command::Queue(Command::To((dist_left * sign) as i32, speed_left as i32).into()))?; }
+
+            if dist_right != 0.0 && speed_right != 0.0 { robot.motor(Motor::DriveRight, Command::Execute)?; }
+            if dist_left != 0.0 && speed_left != 0.0 { robot.motor(Motor::DriveLeft, Command::Execute)?; }
 
             robot.handle_interrupt()?;
 
