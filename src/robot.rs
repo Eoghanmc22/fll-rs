@@ -1,3 +1,4 @@
+use std::time::Duration;
 use anyhow::Result;
 
 /// How the robot should turn
@@ -39,7 +40,7 @@ pub enum Motor {
 }
 // todo support set-points
 /// A motor movement
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Command {
     /// Begin spinning forever
     /// Takes speed param
@@ -58,16 +59,24 @@ pub enum Command {
 
     /// Spin for a set time
     /// Takes time (seconds) and speed params
-    Time(f32, i32),
+    Time(Duration, i32),
 
     /// Sets the motor's target speed
     /// Useful for algorithms that need to dynamically adjust the motors speed
     /// Takes duty cycle param (-100 - 100 percent power)
-    Direct(i32)
+    Direct(i32),
+
+    /// Queues a command to be ran in the future
+    /// Queuing a command could allow it to be executed faster
+    /// This could minimize "kick" when using 2 motors
+    Queue(Box<Command>),
+    
+    /// Executes the queued command
+    Execute
 }
 
 /// A Stop Action
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StopAction {
     /// Freely coast to a stop
     Coast,
@@ -129,6 +138,7 @@ pub trait Robot {
 
     /// Resets the robot
     /// Should panic if called during a mission
+    // Todo Should this even be exposed here?
     fn reset(&self) -> Result<()>;
 
     /// Retrieves the battery percentage
