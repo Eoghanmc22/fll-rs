@@ -4,28 +4,25 @@ use crate::math;
 use crate::movement::acceleration::TrapezoidalAcceleration;
 use crate::movement::pid::{PidConfig, PidController};
 use crate::movement::spec::RobotSpec;
-use crate::robot::{Command, Motor, Robot, StopAction, TurnType};
+use crate::robot::{AngleProvider, Command, Motor, Robot, StopAction, TurnType};
 use crate::error::Result;
 
 /// The standard implementation of movement
 pub struct MovementController {
     pid_config: PidConfig,
-
-    target_direction: f32,
-    spec: RobotSpec
+    target_direction: f32
 }
 
 impl MovementController {
-    pub fn new(pid_config: PidConfig, spec: RobotSpec) -> Self {
+    pub fn new(pid_config: PidConfig) -> Self {
         MovementController {
             pid_config,
-            target_direction: 0.0,
-            spec
+            target_direction: 0.0
         }
     }
 
-    pub fn drive<R: Robot>(&self, robot: &R, distance: i32, speed: i32) -> Result<()> {
-        let spec = &self.spec;
+    pub fn drive<R: Robot + AngleProvider>(&self, robot: &R, distance: i32, speed: i32) -> Result<()> {
+        let spec = robot.spec();
         let current_max_speed = spec.max_speed() * robot.battery()? - 100.0;
 
         let sign = (distance.signum() * speed.signum()) as f32 * spec.gear_ratio().signum();
@@ -49,7 +46,7 @@ impl MovementController {
 
         while position(robot, (true, true))? < distance {
             // Update the PID controller
-            let error = math::subtract_angles(self.target_direction, robot.facing()?);
+            let error = math::subtract_angles(self.target_direction, robot.angle()?);
             let correction = pid.update(error) * sign;
 
             // Get position on acceleration curve
@@ -87,7 +84,7 @@ impl MovementController {
         Ok(())
     }
 
-    pub fn turn<R: Robot>(&self, robot: &R, angle: i32, speed: i32) -> Result<()> {
+    pub fn turn<R: Robot + AngleProvider>(&self, robot: &R, angle: i32, speed: i32) -> Result<()> {
         let difference = math::subtract_angles(angle as f32, self.target_direction);
 
         let turn_type = if difference < 0.0 {
@@ -101,17 +98,17 @@ impl MovementController {
 
     // Has a lot in common with drive, could they be merged?
     // todo implement pid turns??
-    pub fn turn_named<R: Robot>(&self, robot: &R, angle: i32, speed: i32, turn: TurnType) -> Result<()> {
+    pub fn turn_named<R: Robot + AngleProvider>(&self, robot: &R, angle: i32, speed: i32, turn: TurnType) -> Result<()> {
         assert!(speed > 0, "Speed must be greater than 0");
 
-        let spec = &self.spec;
+        let spec = robot.spec();
         let current_max_speed = spec.max_speed() * robot.battery()? - 100.0;
 
         // Calculate how much the wheels need to move for this turn
         // Abs angle -> Rel angle -> distance -> left and right degrees
-        let difference = math::subtract_angles(angle as f32, robot.facing()?);
+        let difference = math::subtract_angles(angle as f32, robot.angle()?);
         let distance = spec.get_distance_for_turn(difference);
-        let (dist_left, dist_right) = turn_split(&turn, distance, spec);
+        let (dist_left, dist_right) = turn_split(&turn, distance, &spec);
 
         // No turn is necessary
         if difference.abs() < 3.0 {
@@ -136,7 +133,7 @@ impl MovementController {
             // Get position on acceleration curve
             let speed = acceleration.now(start).0;
 
-            let (speed_left, speed_right) = turn_split(&turn, speed, spec);
+            let (speed_left, speed_right) = turn_split(&turn, speed, &spec);
 
             if dist_right != 0.0 && speed_right != 0.0 { robot.motor(Motor::DriveRight, Command::Queue(Command::To((dist_right * sign) as i32, speed_right as i32).into()))?; }
             if dist_left != 0.0 && speed_left != 0.0 { robot.motor(Motor::DriveLeft, Command::Queue(Command::To((dist_left * sign) as i32, speed_left as i32).into()))?; }

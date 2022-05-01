@@ -19,7 +19,7 @@ pub fn subtract_angles(a: f32, b: f32) -> f32 {
     normalize_angle(modf(a, 360.0) - modf(b, 360.0))
 }
 
-//todo use ranges
+// todo use ranges
 pub fn clampf(val: f32, min: f32, max: f32) -> f32 {
     debug_assert!(max > min, "Max must be greater then min!");
     val.min(max).max(min)
