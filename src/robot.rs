@@ -1,5 +1,5 @@
 use std::time::Duration;
-use anyhow::Result;
+use crate::error::Result;
 
 /// How the robot should turn
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
@@ -70,7 +70,7 @@ pub enum Command {
     /// Queuing a command could allow it to be executed faster
     /// This could minimize "kick" when using 2 motors
     Queue(Box<Command>),
-    
+
     /// Executes the queued command
     Execute
 }

@@ -5,7 +5,7 @@ use crate::movement::acceleration::TrapezoidalAcceleration;
 use crate::movement::pid::{PidConfig, PidController};
 use crate::movement::spec::RobotSpec;
 use crate::robot::{Command, Motor, Robot, StopAction, TurnType};
-use anyhow::Result;
+use crate::error::Result;
 
 /// The standard implementation of movement
 pub struct MovementController {

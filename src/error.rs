@@ -2,6 +2,8 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use ev3dev_lang_rust::Ev3Error;
 
+pub use anyhow::Result;
+
 pub struct Ev3ErrorWrapper(pub Ev3Error);
 
 impl Debug for Ev3ErrorWrapper {
