@@ -71,7 +71,7 @@ impl TrapezoidalAcceleration {
         let solved =
             target_speed > MIN_SPEED &&
                 total_duration.is_normal() &&
-                constant_duration >= 0.0;
+                constant_duration > -0.0001;
 
         if solved {
             TrapezoidalAcceleration {

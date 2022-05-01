@@ -17,7 +17,7 @@ fn acceleration_test() {
     }
 }
 
-const TIME_STEP: f32 = 0.001;
+const TIME_STEP: f32 = 0.015;
 const ELISION: f32 = 0.001;
 
 fn simulate(distance: f32, speed: f32, acceleration: f32, deceleration: f32) {
