@@ -47,7 +47,7 @@ impl Robot for LegoRobot {
                     thread::sleep(Duration::from_millis(2));
                 }
 
-                Ok(gyro_sensor.get_angle().map_err(Ev3ErrorWrapper)?)
+                gyro_sensor.get_angle().map_err(Ev3ErrorWrapper).context("Couldn't read gyro")
             }
 
             Ok(try_fix_sensor(&self.gyro_sensor)? as f32)
@@ -82,12 +82,12 @@ impl Robot for LegoRobot {
         match cmd {
             Command::On(speed) => {
                 if sp && Some(speed) != motor_handler.speed_sp {
-                    motor.set_speed_sp(speed).map_err(Ev3ErrorWrapper)?;
+                    motor.set_speed_sp(speed).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't write property, motor {:?}", motor_id))?;
 
                     motor_handler.speed_sp = Some(speed);
                 }
                 if run {
-                    motor.run_forever().map_err(Ev3ErrorWrapper)?;
+                    motor.run_forever().map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
 
                     motor_handler.direct = false;
                 }
@@ -96,10 +96,10 @@ impl Robot for LegoRobot {
                 if sp && Some(stopping_action) != motor_handler.stopping_action {
                     let name = stop_action_name(stopping_action);
 
-                    motor.set_stop_action(name).map_err(Ev3ErrorWrapper)?;
+                    motor.set_stop_action(name).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't write property, motor {:?}", motor_id))?;
                 }
                 if run {
-                    motor.stop().map_err(Ev3ErrorWrapper)?;
+                    motor.stop().map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
 
                     motor_handler.direct = false;
                 }
@@ -107,15 +107,15 @@ impl Robot for LegoRobot {
             Command::Distance(distance, speed) => {
                 if sp {
                     if Some(distance) != motor_handler.position_sp {
-                        motor.set_position_sp(distance).map_err(Ev3ErrorWrapper)?;
+                        motor.set_position_sp(distance).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't write property, motor {:?}", motor_id))?;
                     }
 
                     if Some(speed) != motor_handler.speed_sp {
-                        motor.set_speed_sp(speed).map_err(Ev3ErrorWrapper)?;
+                        motor.set_speed_sp(speed).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't write property, motor {:?}", motor_id))?;
                     }
                 }
                 if run {
-                    motor.run_to_rel_pos(None).map_err(Ev3ErrorWrapper)?;
+                    motor.run_to_rel_pos(None).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
 
                     motor_handler.direct = false;
                 }
@@ -123,15 +123,15 @@ impl Robot for LegoRobot {
             Command::To(position, speed) => {
                 if sp {
                     if Some(position) != motor_handler.position_sp {
-                        motor.set_position_sp(position).map_err(Ev3ErrorWrapper)?;
+                        motor.set_position_sp(position).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't write property, motor {:?}", motor_id))?;
                     }
 
                     if Some(speed) != motor_handler.speed_sp {
-                        motor.set_speed_sp(speed).map_err(Ev3ErrorWrapper)?;
+                        motor.set_speed_sp(speed).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't write property, motor {:?}", motor_id))?;
                     }
                 }
                 if run {
-                    motor.run_to_abs_pos(None).map_err(Ev3ErrorWrapper)?;
+                    motor.run_to_abs_pos(None).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
 
                     motor_handler.direct = false;
                 }
@@ -139,26 +139,26 @@ impl Robot for LegoRobot {
             Command::Time(duration, speed) => {
                 if sp {
                     if Some(duration) != motor_handler.time_sp {
-                        motor.set_time_sp(duration.as_millis() as i32).map_err(Ev3ErrorWrapper)?;
+                        motor.set_time_sp(duration.as_millis() as i32).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't write property, motor {:?}", motor_id))?;
                     }
 
                     if Some(speed) != motor_handler.speed_sp {
-                        motor.set_speed_sp(speed).map_err(Ev3ErrorWrapper)?;
+                        motor.set_speed_sp(speed).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't write property, motor {:?}", motor_id))?;
                     }
                 }
                 if run {
-                    motor.run_timed(None).map_err(Ev3ErrorWrapper)?;
+                    motor.run_timed(None).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
 
                     motor_handler.direct = false;
                 }
             }
             Command::Direct(duty_cycle) => {
                 if sp && Some(duty_cycle) != motor_handler.duty_cycle_sp {
-                    motor.set_duty_cycle_sp(duty_cycle).map_err(Ev3ErrorWrapper)?;
+                    motor.set_duty_cycle_sp(duty_cycle).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't write property, motor {:?}", motor_id))?;
                 }
 
                 if run && !motor_handler.direct {
-                    motor.run_direct().map_err(Ev3ErrorWrapper)?;
+                    motor.run_direct().map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
 
                     motor_handler.direct = true;
                 }
@@ -180,22 +180,23 @@ impl Robot for LegoRobot {
     fn speed(&self, motor_id: Motor) -> Result<i32> {
         let (motor, _) = self.motors.get(&motor_id).with_context(|| format!("No {:?} motor", motor_id))?;
 
-        Ok(motor.get_speed().map_err(Ev3ErrorWrapper)?)
+        motor.get_speed().map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't read property, motor {:?}", motor_id))
     }
 
     fn motor_angle(&self, motor_id: Motor) -> Result<i32> {
         let (motor, _) = self.motors.get(&motor_id).with_context(|| format!("No {:?} motor", motor_id))?;
 
-        Ok(motor.get_position().map_err(Ev3ErrorWrapper)?)
+        motor.get_position().map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't read property, motor {:?}", motor_id))
     }
 
     // Todo should this be a "virtual" reset or a real one?
     fn motor_reset(&self, motor_id: Motor, stopping_action: Option<StopAction>) -> Result<()> {
         let (motor, _) = self.motors.get(&motor_id).with_context(|| format!("No {:?} motor", motor_id))?;
 
-        motor.reset().map_err(Ev3ErrorWrapper)?;
+        motor.reset().map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't reset motor {:?}", motor))?;
+
         if let Some(stopping_action) = stopping_action {
-            motor.set_stop_action(stop_action_name(stopping_action)).map_err(Ev3ErrorWrapper)?;
+            motor.set_stop_action(stop_action_name(stopping_action)).map_err(Ev3ErrorWrapper).with_context(|| format!("Couldn't write property, motor {:?}", motor))?;
         }
 
         Ok(())
@@ -204,7 +205,7 @@ impl Robot for LegoRobot {
     // Todo should this be a "virtual" reset or a real one?
     fn reset(&self) -> Result<()> {
         for motor in self.motors.keys() {
-            self.motor_reset(*motor, None)?;
+            self.motor_reset(*motor, None).with_context(|| format!("Couldn't reset motor {:?}", motor))?;
         }
 
         //todo how to reset gyro
@@ -215,8 +216,8 @@ impl Robot for LegoRobot {
 
     fn battery(&self) -> Result<f32> {
         //todo should this adjust for min voltage???
-        let max = self.battery.get_voltage_max_design().map_err(Ev3ErrorWrapper)?;
-        let now = self.battery.get_voltage_now().map_err(Ev3ErrorWrapper)?;
+        let max = self.battery.get_voltage_max_design().map_err(Ev3ErrorWrapper).context("Couldn't read battery")?;
+        let now = self.battery.get_voltage_now().map_err(Ev3ErrorWrapper).context("Couldn't read battery")?;
 
         Ok(now as f32 / max as f32)
     }
