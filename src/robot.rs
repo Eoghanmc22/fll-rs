@@ -181,12 +181,7 @@ pub trait DualColorSensor<C: ColorSensor> {
     fn align(&self, max_distance: i32, speed: i32) -> Result<()>;
 }
 
-pub trait AngleProvider: Robot {
+pub trait AngleProvider {
     /// Retrieves the robot's current heading
-    fn angle(&self) -> Result<f32> {
-        let left = self.motor_angle(Motor::DriveLeft)? as f32;
-        let right = self.motor_angle(Motor::DriveRight)? as f32;
-
-        Ok(self.spec().get_approx_angle(left, right))
-    }
+    fn angle(&self) -> Result<f32>;
 }

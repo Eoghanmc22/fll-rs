@@ -331,7 +331,14 @@ pub trait GyroSensorType {}
 impl GyroSensorType for HasGyroSensor {}
 impl GyroSensorType for NoGyroSensor {}
 
-impl<C: ColorSensorType> AngleProvider for LegoRobot<NoGyroSensor, C> {}
+impl<C: ColorSensorType> AngleProvider for LegoRobot<NoGyroSensor, C> {
+    fn angle(&self) -> Result<f32> {
+        let left = self.motor_angle(Motor::DriveLeft)? as f32;
+        let right = self.motor_angle(Motor::DriveRight)? as f32;
+
+        Ok(self.spec().get_approx_angle(left, right))
+    }
+}
 
 impl<C: ColorSensorType> AngleProvider for LegoRobot<HasGyroSensor, C> {
     fn angle(&self) -> Result<f32> {
