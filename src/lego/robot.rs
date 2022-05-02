@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 use ev3dev_lang_rust::motors::{MotorPort, TachoMotor};
@@ -27,7 +26,7 @@ pub struct LegoRobot<Gyro: GyroSensorType, Color: ColorSensorType> {
 
     motors: HashMap<Motor, (TachoMotor, RefCell<MotorHandler>)>,
 
-    spec: Rc<RobotSpec>,
+    spec: RobotSpec,
 }
 
 #[derive(Default)]
@@ -63,8 +62,6 @@ impl<Gyro: GyroSensorType + Default, Color: ColorSensorType + Default> LegoRobot
             motors.insert(*motor_id, (motor, handler));
         }
 
-        let spec = Rc::new(spec);
-
         Ok(Self {
             gyro_sensor,
             color_sensor,
@@ -81,14 +78,15 @@ impl<Gyro: GyroSensorType + Default> LegoRobot<Gyro, HasDualColorSensor> {
     pub fn new_dual_color_sensor(left_color_sensor: SensorPort, right_color_sensor: SensorPort, motor_definitions: &[(Motor, MotorPort)], pid_config: PidConfig, spec: RobotSpec) -> Result<Self> {
         let gyro_sensor = Default::default();
         let color_sensor = HasDualColorSensor {
-            left: Rc::new(HasColorSensor {
+            left: HasColorSensor {
                 port: Some(left_color_sensor),
                 ..Default::default()
-            }),
-            right: Rc::new(HasColorSensor {
+            },
+            right: HasColorSensor {
                 port: Some(right_color_sensor),
                 ..Default::default()
-            })
+            },
+            _private: Private
         };
 
         let battery = PowerSupply::new().map_err(Ev3ErrorWrapper).context("Couldn't find power supply")?;
@@ -104,8 +102,6 @@ impl<Gyro: GyroSensorType + Default> LegoRobot<Gyro, HasDualColorSensor> {
 
             motors.insert(*motor_id, (motor, handler));
         }
-
-        let spec = Rc::new(spec);
 
         Ok(Self {
             gyro_sensor,
@@ -303,8 +299,8 @@ impl<Gyro: GyroSensorType, Color: ColorSensorType> Robot for LegoRobot<Gyro, Col
         Ok(())
     }
 
-    fn spec(&self) -> Rc<RobotSpec> {
-        self.spec.clone()
+    fn spec(&self) -> &RobotSpec {
+        &self.spec
     }
 }
 
@@ -316,16 +312,20 @@ fn stop_action_name(stopping_action: StopAction) -> &'static str {
     }
 }
 
+#[derive(Default)]
+struct Private;
 
 // todo better naming
 #[derive(Default)]
-struct HasGyroSensor {
+pub struct HasGyroSensor {
     sensor: RefCell<Option<Ev3GyroSensor>>,
     port: Option<SensorPort>,
+
+    _private: Private
 }
 
 #[derive(Default)]
-struct NoGyroSensor;
+pub struct NoGyroSensor(Private);
 
 pub trait GyroSensorType {}
 impl GyroSensorType for HasGyroSensor {}
@@ -377,19 +377,21 @@ impl<C: ColorSensorType> AngleProvider for LegoRobot<HasGyroSensor, C> {
 }
 
 
-struct HasDualColorSensor { left: Rc<HasColorSensor>, right: Rc<HasColorSensor> }
+pub struct HasDualColorSensor { left: HasColorSensor, right: HasColorSensor, _private: Private }
 
 #[derive(Default)]
-struct HasColorSensor {
+pub struct HasColorSensor {
     sensor: RefCell<Option<Ev3ColorSensor>>,
     port: Option<SensorPort>,
 
     white: RefCell<f32>,
     black: RefCell<f32>,
+
+    _private: Private
 }
 
 #[derive(Default)]
-struct NoColorSensor;
+pub struct NoColorSensor(Private);
 
 pub trait ColorSensorType {}
 impl ColorSensorType for NoColorSensor {}
@@ -443,8 +445,8 @@ impl ColorSensor for HasColorSensor {
         Ok(())
     }
 
-    fn follow_line(&self, distance: i32, speed: i32) -> Result<()> {
-        todo!()
+    fn follow_line(&self, _distance: i32, _speed: i32) -> Result<()> {
+        unimplemented!()
     }
 }
 
@@ -462,20 +464,30 @@ impl<G: GyroSensorType> ColorSensor for LegoRobot<G, HasColorSensor> {
     }
 
     fn follow_line(&self, distance: i32, speed: i32) -> Result<()> {
-        self.color_sensor.follow_line(distance, speed)
+        todo!()
     }
 }
 
-impl<G: GyroSensorType> DualColorSensor<HasColorSensor> for LegoRobot<G, HasDualColorSensor> {
-    fn color_right(&self) -> Rc<HasColorSensor> {
-        self.color_sensor.right.clone()
+impl<G: GyroSensorType> DualColorSensor for LegoRobot<G, HasDualColorSensor> {
+    type Sensor = HasColorSensor;
+
+    fn color_right(&self) -> &Self::Sensor {
+        &self.color_sensor.right
     }
 
-    fn color_left(&self) -> Rc<HasColorSensor> {
-        self.color_sensor.left.clone()
+    fn color_left(&self) -> &Self::Sensor {
+        &self.color_sensor.left
     }
 
     fn align(&self, max_distance: i32, speed: i32) -> Result<()> {
+        todo!()
+    }
+
+    fn follow_line_left(&self, distance: i32, speed: i32) -> Result<()> {
+        todo!()
+    }
+
+    fn follow_line_right(&self, distance: i32, speed: i32) -> Result<()> {
         todo!()
     }
 }

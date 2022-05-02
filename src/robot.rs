@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use std::time::Duration;
 use crate::error::Result;
 use crate::movement::spec::RobotSpec;
@@ -152,7 +151,7 @@ pub trait Robot {
     /// Otherwise, returns Ok(())
     fn handle_interrupt(&self) -> Result<()>;
 
-    fn spec(&self) -> Rc<RobotSpec>;
+    fn spec(&self) -> &RobotSpec;
 }
 
 pub trait ColorSensor {
@@ -165,20 +164,30 @@ pub trait ColorSensor {
     /// Sets the black (0.0) definition
     fn cal_black(&self) -> Result<()>;
 
-    /// Used the color sensor to follow
+    /// Use the color sensor to follow a line
     fn follow_line(&self, distance: i32, speed: i32) -> Result<()>;
 }
 
-pub trait DualColorSensor<C: ColorSensor> {
+pub trait DualColorSensor {
+    type Sensor: ColorSensor;
+
     /// Retrieves the right color sensor
-    fn color_right(&self) -> Rc<C>;
+    fn color_right(&self) -> &Self::Sensor;
 
     /// Retrieves the left color sensor
-    fn color_left(&self) -> Rc<C>;
+    fn color_left(&self) -> &Self::Sensor;
 
     /// Moves the the robot at `speed` until a line is hit
     /// then try to align the robot perpendicular to that line
     fn align(&self, max_distance: i32, speed: i32) -> Result<()>;
+
+    // todo this api is sub-par because follow_line implemented on `Sensor` is accessible but impossible to implement (no reference to Robot)
+
+    /// Use the left color sensor to follow a line
+    fn follow_line_left(&self, distance: i32, speed: i32) -> Result<()>;
+
+    /// Use the right color sensor to follow a line
+    fn follow_line_right(&self, distance: i32, speed: i32) -> Result<()>;
 }
 
 pub trait AngleProvider {
