@@ -4,7 +4,12 @@ pub mod menu;
 pub mod graphics;
 pub mod profiler;
 pub mod movement;
-pub mod lego;
+#[cfg(target_arch = "arm")]
+#[path = "lego.rs"]
+pub mod robot_impl;
+#[cfg(not(target_arch = "arm"))]
+#[path = "mock.rs"]
+pub mod robot_impl;
 pub mod error;
 
 #[cfg(test)]
