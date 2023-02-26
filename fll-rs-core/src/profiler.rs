@@ -1,9 +1,11 @@
-use std::time::{Instant, Duration};
-use std::collections::{hash_map, HashMap};
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+// TODO Actually use this
 
 #[derive(Clone)]
-struct Profiler {
+pub struct Profiler {
     stack: Vec<Frame>,
     root: Node,
 }
@@ -32,7 +34,7 @@ impl Frame {
         ElapsedFrame {
             duration: self.start.elapsed(),
             name: self.name,
-            count: 1
+            count: 1,
         }
     }
 }
@@ -42,7 +44,7 @@ impl ElapsedFrame {
         ElapsedFrame {
             duration: Duration::from_secs(0),
             name: name.to_owned(),
-            count: 0
+            count: 0,
         }
     }
 }
@@ -51,12 +53,12 @@ impl Node {
     pub fn with_name(name: &str) -> Node {
         Node {
             frame: ElapsedFrame::with_name(name),
-            children: HashMap::new()
+            children: HashMap::new(),
         }
     }
 
     pub fn get(&mut self, name: &str) -> &mut Node {
-        if let hash_map::Entry::Vacant(vacant) = self.children.entry(name.to_owned()) {
+        if let Entry::Vacant(vacant) = self.children.entry(name.to_owned()) {
             vacant.insert(Node::with_name(name));
         }
 
@@ -65,7 +67,10 @@ impl Node {
     }
 
     pub fn insert_frame(&mut self, frame: &ElapsedFrame) {
-        let old = self.children.remove(&frame.name).unwrap_or_else(|| Node::with_name(&frame.name));
+        let old = self
+            .children
+            .remove(&frame.name)
+            .unwrap_or_else(|| Node::with_name(&frame.name));
         let new = Node {
             frame: ElapsedFrame {
                 duration: old.frame.duration + frame.duration,
@@ -80,17 +85,27 @@ impl Node {
 }
 
 impl Profiler {
-    pub fn push(&mut self, name: & str) {
+    pub fn new() -> Self {
+        Self {
+            stack: vec![],
+            root: Node::with_name("Root"),
+        }
+    }
+
+    pub fn push(&mut self, name: &str) {
         self.stack.push(Frame {
             start: Instant::now(),
-            name: name.to_owned()
+            name: name.to_owned(),
         });
     }
 
     pub fn pop_named(&mut self, expected_name: &str) {
         if let Some(frame) = self.stack.pop() {
             if !expected_name.is_empty() && frame.name != expected_name {
-                panic!("profiler over pushed, got {} expected {}", frame.name, expected_name);
+                panic!(
+                    "profiler over pushed, got {} expected {}",
+                    frame.name, expected_name
+                );
             }
 
             let elapsed_frame = frame.elapsed();
@@ -116,7 +131,14 @@ impl Profiler {
 
     fn report_0(node: &Node, depth: usize) {
         let x = node.frame.duration.as_secs_f32() * 1000.0;
-        eprintln!("{}{} took {} ms over {} calls (avg. {} ms)", "\t".repeat(depth), node.frame.name, x, node.frame.count, x / node.frame.count as f32);
+        eprintln!(
+            "{}{} took {} ms over {} calls (avg. {} ms)",
+            "\t".repeat(depth),
+            node.frame.name,
+            x,
+            node.frame.count,
+            x / node.frame.count as f32
+        );
 
         for entry in node.children.iter() {
             Profiler::report_0(entry.1, depth + 1);

@@ -13,6 +13,7 @@ pub struct RobotSpec {
     wheelbase_circumference: f32,
     wheelbase_diameter: f32,
 
+    // TODO how are these calculated?
     error_wheelbase: f32,
     error_wheel: f32,
     error_wheel_right: f32,
@@ -56,7 +57,7 @@ impl RobotSpec {
             error_wheel,
             error_wheel_right,
             error_wheel_left,
-            max_speed
+            max_speed,
         }
     }
 
@@ -146,18 +147,25 @@ impl RobotSpec {
         self.max_speed
     }
 
+    /// Calculated the amount of degrees a wheel would need to turn to cause the robot to turn
+    /// `angle` degrees
     pub fn get_distance_for_turn(&self, angle: f32) -> f32 {
         angle * self.wheelbase_circumference / self.wheel_circumference / self.gear_ratio
     }
 
+    /// Calculated the direction the robot should be facing based on the wheel angles
     pub fn get_approx_angle(&self, left: f32, right: f32) -> f32 {
-        (left * self.wheel_left_circumference - right * self.wheel_right_circumference) * self.gear_ratio / self.wheelbase_circumference
+        (left * self.wheel_left_circumference - right * self.wheel_right_circumference)
+            * self.gear_ratio
+            / self.wheelbase_circumference
     }
 
+    /// Converts wheel degrees to millimeters
     pub fn deg_to_mm(&self, deg: f32) -> f32 {
         deg / 360.0 * self.wheel_circumference * self.gear_ratio
     }
 
+    /// Converts millimeters to wheel degrees
     pub fn mm_to_deg(&self, mm: f32) -> f32 {
         mm / self.gear_ratio / self.wheel_circumference * 360.0
     }

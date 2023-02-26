@@ -32,7 +32,7 @@ fn simulate(distance: f32, speed: f32, acceleration: f32, deceleration: f32) {
             "Computed speed ({}) is greater than the provided speed ({})", acceleration_curve.target_speed(), speed);
 
 
-    let mut data = Vec::new();
+    let mut data = vec![];
 
     let mut pos = 0.0;
     let mut duration = 0.0;

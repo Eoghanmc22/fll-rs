@@ -1,6 +1,7 @@
-use std::time::Duration;
 use crate::error::Result;
+use crate::input::Input;
 use crate::movement::spec::RobotSpec;
+use std::time::Duration;
 
 /// How the robot should turn
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
@@ -12,32 +13,26 @@ pub enum TurnType {
     Left,
 
     /// Turn using both wheels
-    Center
+    Center,
 }
 
 impl TurnType {
     pub fn wheels(&self) -> (bool, bool) {
         match self {
-            TurnType::Right => {
-                (false, true)
-            }
-            TurnType::Left => {
-                (true, false)
-            }
-            TurnType::Center => {
-                (true, true)
-            }
+            TurnType::Right => (false, true),
+            TurnType::Left => (true, false),
+            TurnType::Center => (true, true),
         }
     }
 }
 
 /// Identifies a motor
 #[derive(Eq, PartialEq, Copy, Clone, Hash, Debug)]
-pub enum Motor {
+pub enum MotorId {
     DriveRight,
     DriveLeft,
     AttachmentRight,
-    AttachmentLeft
+    AttachmentLeft,
 }
 // todo support set-points
 /// A motor movement
@@ -64,16 +59,19 @@ pub enum Command {
 
     /// Sets the motor's target speed
     /// Useful for algorithms that need to dynamically adjust the motors speed
-    /// Takes duty cycle param (-100 - 100 percent power)
+    /// Takes duty cycle param (-100 to 100 percent power)
     Direct(i32),
 
-    /// Queues a command to be ran in the future
+    /// Queues a command to be ran when a `Execute` command is sent
     /// Queuing a command could allow it to be executed faster
     /// This could minimize "kick" when using 2 motors
+    ///
+    /// Not guranteed to be kept if additional commands are sent to this motor
+    /// between this command and the next `Execute` command
     Queue(Box<Command>),
 
     /// Executes the queued command
-    Execute
+    Execute,
 }
 
 /// A Stop Action
@@ -84,11 +82,19 @@ pub enum StopAction {
     /// Cause motors to stop more quickly than `Coast` but without holding its position
     Break,
     /// Actively holds a motor's position
-    Hold
+    Hold,
+}
+
+/// Identifies a sensor
+#[derive(Eq, PartialEq, Copy, Clone, Hash, Debug)]
+pub enum SensorId {
+    DriveLeft,
+    AttachmentRight,
+    AttachmentLeft,
 }
 
 /// Represents a simple robot with 2 wheels to move and a method to sense direction
-pub trait Robot {
+pub trait Robot: AngleProvider {
     /// Drive the robot using the gyro to correct for errors
     ///
     /// # Returns
@@ -127,21 +133,8 @@ pub trait Robot {
     /// This function may panic if `speed` is less than or equal to 0
     fn turn_named(&self, angle: i32, speed: i32, turn: TurnType) -> Result<()>;
 
-    /// Moves a motor
-    fn motor(&self, motor: Motor, movement: Command) -> Result<()>;
-
-    /// Waits until a motor is finished moving
-    fn wait(&self, motor: Motor) -> Result<()>;
-
-    /// Retrieves the speed of a motor
-    fn speed(&self, motor: Motor) -> Result<i32>;
-
-    /// Retrieves the angle of a motor
-    fn motor_angle(&self, motor: Motor) -> Result<i32>;
-
-    /// Resets the angle of a motor to 0
-    /// this method sets the stopping action for implicit stops
-    fn motor_reset(&self, motor: Motor, stopping_action: Option<StopAction>) -> Result<()>;
+    /// Retereives a motor
+    fn motor(&self, motor: MotorId) -> &dyn Motor;
 
     /// Retrieves the battery percentage
     /// Ranges from 0.0 -> 1.0
@@ -151,6 +144,16 @@ pub trait Robot {
     /// Otherwise, returns Ok(())
     fn handle_interrupt(&self) -> Result<()>;
 
+    /// Returns the status of the robot's buttons
+    fn process_buttons(&self) -> Result<Input>;
+
+    /// Waits for the status of the robot's buttons and returns that new status
+    fn await_input(&self) -> Result<Input>;
+
+    /// Resets the robot's state
+    fn reset(&mut self) -> Result<()>;
+
+    /// Returns information about the robot
     fn spec(&self) -> &RobotSpec;
 }
 
@@ -158,36 +161,31 @@ pub trait ColorSensor {
     /// Retrieves the light reflected into the color sensor
     fn reflected_light(&self) -> Result<f32>;
 
+    // TODO color getter
+
     /// Sets the white (1.0) definition
     fn cal_white(&self) -> Result<()>;
 
     /// Sets the black (0.0) definition
     fn cal_black(&self) -> Result<()>;
-
-    /// Use the color sensor to follow a line
-    fn follow_line(&self, distance: i32, speed: i32) -> Result<()>;
 }
 
-pub trait DualColorSensor {
-    type Sensor: ColorSensor;
+pub trait Motor {
+    /// Start a motor movement
+    fn command(&self, command: Command) -> Result<()>;
 
-    /// Retrieves the right color sensor
-    fn color_right(&self) -> &Self::Sensor;
+    /// Waits until a motor is finished moving
+    fn wait(&self) -> Result<()>;
 
-    /// Retrieves the left color sensor
-    fn color_left(&self) -> &Self::Sensor;
+    /// Retrieves the speed of a motor
+    fn speed(&self) -> Result<i32>;
 
-    /// Moves the the robot at `speed` until a line is hit
-    /// then try to align the robot perpendicular to that line
-    fn align(&self, max_distance: i32, speed: i32) -> Result<()>;
+    /// Retrieves the angle of a motor
+    fn motor_angle(&self) -> Result<i32>;
 
-    // todo this api is sub-par because follow_line implemented on `Sensor` is accessible but impossible to implement (no reference to Robot)
-
-    /// Use the left color sensor to follow a line
-    fn follow_line_left(&self, distance: i32, speed: i32) -> Result<()>;
-
-    /// Use the right color sensor to follow a line
-    fn follow_line_right(&self, distance: i32, speed: i32) -> Result<()>;
+    /// Resets the angle of a motor to 0
+    /// this method sets the stopping action for implicit stops
+    fn motor_reset(&self, stopping_action: Option<StopAction>) -> Result<()>;
 }
 
 pub trait AngleProvider {

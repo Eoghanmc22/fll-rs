@@ -1,0 +1,13 @@
+[package]
+name = "fll-rs-mock"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { version = "1.0.57", features = ["backtrace"] }
+
+fll-rs = { path = "../fll-rs-core", package = "fll-rs-core" }
+
+image = { version = "0.24.2", default-features = false }
+
+minifb = "0.20.0"
