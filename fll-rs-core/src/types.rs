@@ -48,7 +48,7 @@ pub enum Distance {
 impl Distance {
     pub fn to_deg(self, spec: &RobotSpec) -> Degrees {
         match self {
-            Distance::Milimeters(val) => Degrees(spec.mm_to_deg(val.0)),
+            Distance::Milimeters(val) => spec.mm_to_deg(val),
             Distance::Degrees(val) => val,
             Distance::Rotations(val) => Degrees(val.0 * 360.0),
         }
@@ -56,7 +56,7 @@ impl Distance {
 
     pub fn to_rot(self, spec: &RobotSpec) -> Rotations {
         match self {
-            Distance::Milimeters(val) => Rotations(spec.mm_to_deg(val.0) / 360.0),
+            Distance::Milimeters(val) => Rotations(spec.mm_to_deg(val).0 / 360.0),
             Distance::Rotations(val) => val,
             Distance::Degrees(val) => Rotations(val.0 / 360.0),
         }
@@ -65,8 +65,8 @@ impl Distance {
     pub fn to_mm(self, spec: &RobotSpec) -> Milimeters {
         match self {
             Distance::Milimeters(val) => val,
-            Distance::Rotations(val) => Milimeters(spec.deg_to_mm(val.0 * 360.0)),
-            Distance::Degrees(val) => Milimeters(spec.deg_to_mm(val.0)),
+            Distance::Rotations(val) => spec.deg_to_mm((val.0 * 360.0).deg()),
+            Distance::Degrees(val) => spec.deg_to_mm(val),
         }
     }
 }
