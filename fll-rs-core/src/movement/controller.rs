@@ -4,6 +4,7 @@ use crate::movement::acceleration::TrapezoidalAcceleration;
 use crate::movement::pid::{PidConfig, PidController};
 use crate::movement::spec::RobotSpec;
 use crate::robot::{AngleProvider, Command, Motor, MotorId, Robot, StopAction, TurnType};
+use crate::types::{Degrees, DegreesPerSecond, Heading, UnitsExt};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -13,25 +14,25 @@ use std::time::{Duration, Instant};
 /// The standard implementation of movement
 pub struct MovementController {
     pid_config: PidConfig,
-    target_direction: f32,
+    target_direction: Heading,
 }
 
 impl MovementController {
     pub fn new(pid_config: PidConfig) -> Self {
         MovementController {
             pid_config,
-            target_direction: 0.0,
+            target_direction: Heading(0.0),
         }
     }
 
     pub fn drive<R: Robot + AngleProvider>(
         &self,
         robot: &R,
-        distance: i32,
-        speed: i32,
+        Degrees(distance): Degrees,
+        DegreesPerSecond(speed): DegreesPerSecond,
     ) -> Result<()> {
         let spec = robot.spec();
-        let current_max_speed = spec.max_speed() * robot.battery()? - 100.0;
+        let current_max_speed = spec.max_speed().0 * robot.battery()?.0 - 100.0;
 
         let sign = (distance.signum() * speed.signum()) as f32 * spec.gear_ratio().signum();
         let distance = distance.abs() as f32;
@@ -41,8 +42,12 @@ impl MovementController {
         assert_ne!(sign, 0.0, "Illegal parameters!");
 
         // Generate the acceleration curve
-        let acceleration =
-            TrapezoidalAcceleration::new(distance, speed, spec.acceleration(), spec.deceleration());
+        let acceleration = TrapezoidalAcceleration::new(
+            distance.deg(),
+            speed.dps(),
+            spec.acceleration(),
+            spec.deceleration(),
+        );
         // Setup the PID controller
         let mut pid = PidController::new(self.pid_config);
 
@@ -56,13 +61,13 @@ impl MovementController {
         // Record the start time for acceleration
         let start = Instant::now();
 
-        while position(&[right, left])? < distance {
+        while position(&spec, &[right, left])?.0 < distance {
             // Update the PID controller
-            let error = math::subtract_angles(self.target_direction, robot.angle()?);
+            let error = math::subtract_angles(self.target_direction, robot.angle()?).0;
             let correction = pid.update(error) * sign;
 
             // Get position on acceleration curve
-            let speed = acceleration.get_speed(start.elapsed().as_secs_f32()).0;
+            let speed = acceleration.get_speed(start.elapsed()).0;
 
             // Use correction from the PID controller to create per wheel speed
             let (speed_left, speed_right) = {
@@ -77,15 +82,15 @@ impl MovementController {
 
             right.command(Command::Queue(
                 Command::To(
-                    (distance * spec.error_wheel_right() * sign) as i32,
-                    speed_right as i32,
+                    (distance * spec.error_wheel_right() * sign).deg().into(),
+                    speed_right.dps().into(),
                 )
                 .into(),
             ))?;
             left.command(Command::Queue(
                 Command::To(
-                    (distance * spec.error_wheel_left() * sign) as i32,
-                    speed_left as i32,
+                    (distance * spec.error_wheel_left() * sign).deg().into(),
+                    speed_left.dps().into(),
                 )
                 .into(),
             ))?;
@@ -109,10 +114,15 @@ impl MovementController {
         Ok(())
     }
 
-    pub fn turn<R: Robot + AngleProvider>(&self, robot: &R, angle: i32, speed: i32) -> Result<()> {
-        let difference = math::subtract_angles(angle as f32, self.target_direction);
+    pub fn turn<R: Robot + AngleProvider>(
+        &self,
+        robot: &R,
+        angle: Heading,
+        speed: DegreesPerSecond,
+    ) -> Result<()> {
+        let difference = math::subtract_angles(angle, self.target_direction);
 
-        let turn_type = if difference < 0.0 {
+        let turn_type = if difference.0 < 0.0 {
             TurnType::Right
         } else {
             TurnType::Left
@@ -126,23 +136,23 @@ impl MovementController {
     pub fn turn_named<R: Robot + AngleProvider>(
         &self,
         robot: &R,
-        angle: i32,
-        speed: i32,
+        angle: Heading,
+        DegreesPerSecond(speed): DegreesPerSecond,
         turn: TurnType,
     ) -> Result<()> {
-        assert!(speed > 0, "Speed must be greater than 0");
+        assert!(speed > 0.0, "Speed must be greater than 0");
 
         let spec = robot.spec();
-        let current_max_speed = spec.max_speed() * robot.battery()? - 100.0;
+        let current_max_speed = spec.max_speed().0 * robot.battery()?.0 - 100.0;
 
         // Calculate how much the wheels need to move for this turn
         // Abs angle -> Rel angle -> distance -> left and right degrees
-        let difference = math::subtract_angles(angle as f32, robot.angle()?);
-        let distance = spec.get_distance_for_turn(difference);
+        let difference = math::subtract_angles(angle, robot.angle()?);
+        let distance = spec.get_distance_for_turn(difference).0;
         let (dist_left, dist_right) = turn_split(&turn, distance, spec);
 
         // No turn is necessary
-        if difference.abs() < 3.0 {
+        if difference.0.abs() < 3.0 {
             return Ok(());
         }
 
@@ -151,8 +161,12 @@ impl MovementController {
         let speed = f32::clamp(speed as f32, -current_max_speed, current_max_speed);
 
         // Generate the acceleration curve
-        let acceleration =
-            TrapezoidalAcceleration::new(distance, speed, spec.acceleration(), spec.deceleration());
+        let acceleration = TrapezoidalAcceleration::new(
+            distance.deg(),
+            speed.dps(),
+            spec.acceleration(),
+            spec.deceleration(),
+        );
 
         // Setup motors
         let right = robot.motor(MotorId::DriveRight);
@@ -164,17 +178,17 @@ impl MovementController {
         // Record the start time for acceleration
         let start = Instant::now();
 
-        while position(&[right, left])? < distance {
+        while position(&spec, &[right, left])?.0 < distance {
             // Get position on acceleration curve
-            let speed = acceleration.get_speed(start.elapsed().as_secs_f32()).0;
+            let speed = acceleration.get_speed(start.elapsed()).0;
 
             let (speed_left, speed_right) = turn_split(&turn, speed, spec);
 
             right.command(Command::Queue(
-                Command::To((dist_right * sign) as i32, speed_right as i32).into(),
+                Command::To((dist_right * sign).deg().into(), speed_right.dps().into()).into(),
             ))?;
             left.command(Command::Queue(
-                Command::To((dist_left * sign) as i32, speed_left as i32).into(),
+                Command::To((dist_left * sign).deg().into(), speed_left.dps().into()).into(),
             ))?;
 
             right.command(Command::Execute)?;
@@ -196,20 +210,20 @@ impl MovementController {
     }
 }
 
-fn position(motors: &[&dyn Motor]) -> Result<f32> {
+fn position(spec: &RobotSpec, motors: &[&dyn Motor]) -> Result<Degrees> {
     debug_assert!(!motors.is_empty());
 
     let mut sum = 0.0;
     let mut count = 0.0;
 
     for motor in motors {
-        let left_pos = motor.motor_angle()?.abs();
+        let left_pos = motor.motor_angle()?.to_deg(&spec).0.abs();
 
         sum += left_pos as f32;
         count += 1.0;
     }
 
-    Ok(sum / count)
+    Ok((sum / count).deg())
 }
 
 fn turn_split(turn_type: &TurnType, val: f32, spec: &RobotSpec) -> (f32, f32) {

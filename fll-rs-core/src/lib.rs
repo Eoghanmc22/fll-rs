@@ -9,6 +9,7 @@ pub mod math;
 pub mod movement;
 pub mod profiler;
 pub mod robot;
+pub mod types;
 
 #[cfg(test)]
 mod tests {

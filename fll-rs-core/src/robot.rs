@@ -1,6 +1,7 @@
 use crate::error::Result;
 use crate::input::Input;
 use crate::movement::spec::RobotSpec;
+use crate::types::{Distance, Heading, Percent, Speed};
 use std::time::Duration;
 
 /// How the robot should turn
@@ -36,31 +37,33 @@ pub enum MotorId {
 }
 // todo support set-points
 /// A motor movement
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     /// Begin spinning forever
     /// Takes speed param
-    On(i32),
+    On(Speed),
 
     /// Stop spinning
     Stop(StopAction),
 
     /// Spin for a set distance (relative)
     /// Takes distance and speed params
-    Distance(i32, i32),
+    Distance(Distance, Speed),
 
     /// Spin to a set angle (absolute)
-    /// Takes distance and speed params
-    To(i32, i32),
+    /// Takes position and speed params
+    ///
+    /// Position is in distance from last reset
+    To(Distance, Speed),
 
     /// Spin for a set time
     /// Takes time (seconds) and speed params
-    Time(Duration, i32),
+    Time(Duration, Speed),
 
     /// Sets the motor's target speed
     /// Useful for algorithms that need to dynamically adjust the motors speed
     /// Takes duty cycle param (-100 to 100 percent power)
-    Direct(i32),
+    Direct(Percent),
 
     /// Queues a command to be ran when a `Execute` command is sent
     /// Queuing a command could allow it to be executed faster
@@ -105,7 +108,7 @@ pub trait Robot: AngleProvider {
     /// # Panics
     ///
     /// This function may panic if `distance` or `speed` equal 0
-    fn drive(&self, distance: i32, speed: i32) -> Result<()>;
+    fn drive(&self, distance: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()>;
 
     /// Turns the robot using the gyro sensor
     /// Guesses the turn type from the turn direction
@@ -118,7 +121,7 @@ pub trait Robot: AngleProvider {
     /// # Panics
     ///
     /// This function may panic if `speed` is less than or equal to 0
-    fn turn(&self, angle: i32, speed: i32) -> Result<()>;
+    fn turn(&self, angle: Heading, speed: impl Into<Speed>) -> Result<()>;
 
     /// Turns the robot
     /// Uses specified turn type using the gyro sensor
@@ -131,14 +134,14 @@ pub trait Robot: AngleProvider {
     /// # Panics
     ///
     /// This function may panic if `speed` is less than or equal to 0
-    fn turn_named(&self, angle: i32, speed: i32, turn: TurnType) -> Result<()>;
+    fn turn_named(&self, angle: Heading, speed: impl Into<Speed>, turn: TurnType) -> Result<()>;
 
     /// Retereives a motor
     fn motor(&self, motor: MotorId) -> &dyn Motor;
 
     /// Retrieves the battery percentage
     /// Ranges from 0.0 -> 1.0
-    fn battery(&self) -> Result<f32>;
+    fn battery(&self) -> Result<Percent>;
 
     /// Returns an error if an interrupt has been requested
     /// Otherwise, returns Ok(())
@@ -159,7 +162,7 @@ pub trait Robot: AngleProvider {
 
 pub trait ColorSensor {
     /// Retrieves the light reflected into the color sensor
-    fn reflected_light(&self) -> Result<f32>;
+    fn reflected_light(&self) -> Result<Percent>;
 
     // TODO color getter
 
@@ -178,10 +181,10 @@ pub trait Motor {
     fn wait(&self) -> Result<()>;
 
     /// Retrieves the speed of a motor
-    fn speed(&self) -> Result<i32>;
+    fn speed(&self) -> Result<Speed>;
 
-    /// Retrieves the angle of a motor
-    fn motor_angle(&self) -> Result<i32>;
+    /// Retrieves the angle of a motor in distance from the last reset
+    fn motor_angle(&self) -> Result<Distance>;
 
     /// Resets the angle of a motor to 0
     /// this method sets the stopping action for implicit stops
@@ -190,5 +193,5 @@ pub trait Motor {
 
 pub trait AngleProvider {
     /// Retrieves the robot's current heading
-    fn angle(&self) -> Result<f32>;
+    fn angle(&self) -> Result<Heading>;
 }

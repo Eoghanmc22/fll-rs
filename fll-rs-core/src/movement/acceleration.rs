@@ -1,3 +1,7 @@
+use std::time::Duration;
+
+use crate::types::{Degrees, DegreesPerSecond, DegreesPerSecondPerSecond};
+
 pub struct TrapezoidalAcceleration {
     acceleration: f32,
     deceleration: f32,
@@ -28,10 +32,10 @@ pub const STOPPING_LENGTH: f32 = STOPPING_DURATION * MIN_SPEED;
 impl TrapezoidalAcceleration {
     /// Generates a new acceleration curve
     pub fn new(
-        total_distance: f32,
-        target_speed: f32,
-        acceleration: f32,
-        deceleration: f32,
+        Degrees(total_distance): Degrees,
+        DegreesPerSecond(target_speed): DegreesPerSecond,
+        DegreesPerSecondPerSecond(acceleration): DegreesPerSecondPerSecond,
+        DegreesPerSecondPerSecond(deceleration): DegreesPerSecondPerSecond,
     ) -> Self {
         assert!(
             total_distance >= 0.0,
@@ -112,31 +116,33 @@ impl TrapezoidalAcceleration {
     }
 
     /// Gets the speed form the acceleration curve at the current time in seconds
-    pub fn get_speed(&self, time: f32) -> (f32, AccelerationPhase) {
+    pub fn get_speed(&self, time: Duration) -> (f32, AccelerationPhase) {
+        let sec = time.as_secs_f32();
+
         if self.target_speed <= MIN_SPEED {
             // The acceleration curve is not defined for the requested parameters
             return (MIN_SPEED, AccelerationPhase::Stopping);
         }
 
-        if time < 0.0 {
+        if sec < 0.0 {
             // Backup definition for illegal inputs
             (MIN_SPEED, AccelerationPhase::Illegal)
-        } else if time < self.acceleration_end {
+        } else if sec < self.acceleration_end {
             // Acceleration
             (
-                self.acceleration * time + MIN_SPEED,
+                self.acceleration * sec + MIN_SPEED,
                 AccelerationPhase::RampUp,
             )
-        } else if time < self.const_end {
+        } else if sec < self.const_end {
             // Constant
             (self.target_speed, AccelerationPhase::Constant)
-        } else if time < self.deceleration_end {
+        } else if sec < self.deceleration_end {
             // Deceleration
             (
-                self.target_speed - self.deceleration * (time - self.const_end),
+                self.target_speed - self.deceleration * (sec - self.const_end),
                 AccelerationPhase::RampDown,
             )
-        } else if time < self.total_duration {
+        } else if sec < self.total_duration {
             // Stopping
             (MIN_SPEED, AccelerationPhase::Stopping)
         } else {
