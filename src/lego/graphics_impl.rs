@@ -1,5 +1,5 @@
+use crate::{error::Result, graphics::display::Display};
 use ev3dev_lang_rust::Screen;
-use fll_rs::{error::Result, graphics::display::Display};
 
 pub struct LegoDisplay {
     screen: Screen,
