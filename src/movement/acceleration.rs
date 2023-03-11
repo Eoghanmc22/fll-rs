@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use crate::types::{Degrees, DegreesPerSecond, DegreesPerSecondPerSecond};
 
+/// Repersents a precalculated acceleration curve with 4 phases
+/// Acceleration, Constant speed, Deceleration, Stopping
 pub struct TrapezoidalAcceleration {
     acceleration: f32,
     deceleration: f32,
@@ -17,6 +19,7 @@ pub struct TrapezoidalAcceleration {
     solved: bool,
 }
 
+/// Models the curent phase of the acceleration curve
 pub enum AccelerationPhase {
     RampUp,
     Constant,
@@ -25,8 +28,11 @@ pub enum AccelerationPhase {
     Illegal,
 }
 
+/// Slowest speed the robot will go in degrees per second
 pub const MIN_SPEED: f32 = 100.0;
+/// The amount time to spend in the "Stopping"
 pub const STOPPING_DURATION: f32 = 0.25;
+/// Length of "Stoping" phase
 pub const STOPPING_LENGTH: f32 = STOPPING_DURATION * MIN_SPEED;
 
 impl TrapezoidalAcceleration {

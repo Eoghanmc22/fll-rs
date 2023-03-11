@@ -1,6 +1,7 @@
 use crate::{error::Result, graphics::display::Display};
 use ev3dev_lang_rust::Screen;
 
+/// Implemention of `Display` for ev3dev
 pub struct LegoDisplay {
     screen: Screen,
 }

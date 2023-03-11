@@ -1,6 +1,8 @@
+//! Newtype definitions for units
+
 use crate::movement::spec::RobotSpec;
 
-// TODO validation
+// TODO check i did this right
 
 /// Repersents distance in milimeters
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]

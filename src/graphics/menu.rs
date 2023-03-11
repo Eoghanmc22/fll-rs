@@ -37,9 +37,12 @@ impl Menu {
         });
     }
 
-    fn enforce_bounds(&mut self) {
+    /// Makes sure the cursor is in a valid location
+    fn update_bounds(&mut self) {
+        // Wraps cursor to be a valid entry in the list
         self.selected %= self.items.len();
 
+        // Updates what the top entry displayed is to follow the cursor
         let offset = self.selected as isize - self.top as isize;
         if offset < 0 {
             self.top = self.selected;
@@ -93,24 +96,26 @@ impl Menu {
     ///
     /// Return true if the menu should remain open
     pub fn notify_input(&mut self, input: &Input) -> bool {
+        // Update cursor
         if input.pressed_down() {
             self.selected += 1;
         }
-
         if input.pressed_up() {
             self.selected -= 1;
         }
 
-        self.enforce_bounds();
+        self.update_bounds();
 
         if input.pressed_enter() {
             if let Some(item) = self.items.get_mut(self.selected) {
+                // Enter the selected menu
                 (item.callback)();
             } else {
                 eprintln!("Menu cursor in invalid position");
             }
         }
 
+        // If the user pressed left, we should return to the parent menu
         !input.pressed_left()
     }
 }

@@ -1,12 +1,12 @@
 #[derive(Copy, Clone, Debug)]
 pub struct PidConfig {
-    /// how strongly to correct current error
+    /// How strongly to correct current error
     pub kp: f32,
-    
-    /// how strongly to correct to long term drift
+
+    /// How strongly to correct to long term drift
     pub ki: f32,
 
-    /// how strongly to correct to predicted error
+    /// How strongly to correct for predicted error
     pub kd: f32,
 }
 
@@ -16,12 +16,16 @@ pub struct PidController {
     pid: PidConfig,
 
     integral: f32,
-    last_error: f32
+    last_error: f32,
 }
 
 impl PidController {
     pub fn new(pid: PidConfig) -> Self {
-        PidController { pid, integral: 0.0, last_error: 0.0 }
+        PidController {
+            pid,
+            integral: 0.0,
+            last_error: 0.0,
+        }
     }
 
     // TODO could this be improved with knowledge of the duration of the time step?

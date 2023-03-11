@@ -11,6 +11,17 @@ use std::time::{Duration, Instant};
 // TODO only have a single method that interfaces with the motors thats versatile enough to
 // implement everything else. ie has end condition, control loop, gyro/color as input
 
+// Turns, drives and arcs are all really the same thing
+// They all have a starting and ending angle (for a drive these 2 are equal)
+// Each of these could be given a coeffecent where dual turn right is 2.0,
+// turn in place right is 1.0, drive is 0.0, and arcs are between 0.0 and 1.0.
+// The power to each wheel would be calculated with:
+// left  = 2 -> -1, 1 -> 0, 0 -> 1, -1 -> 1, -2 ->  1
+// right = 2 ->  1, 1 -> 1, 0 -> 1, -1 -> 0, -2 -> -1
+// x = min(max(x, -2), 2)
+// left  = min(1 - x, 1)
+// right = min(1 + x, 1)
+
 /// The standard implementation of movement
 pub struct MovementController {
     pid_config: PidConfig,
@@ -25,6 +36,7 @@ impl MovementController {
         }
     }
 
+    /// Implementation of the gyro drive algorithm
     pub fn drive<R: Robot + AngleProvider>(
         &self,
         robot: &R,
@@ -37,6 +49,11 @@ impl MovementController {
         let sign = (distance.signum() * speed.signum()) as f32 * spec.gear_ratio().signum();
         let distance = distance.abs() as f32;
         let speed = f32::clamp(speed.abs() as f32, -current_max_speed, current_max_speed);
+
+        if !sign.is_normal() {
+            eprintln!("Skipped drive with bad imputs!");
+            return Ok(());
+        }
 
         // Would take infinite or zero time to complete
         assert_ne!(sign, 0.0, "Illegal parameters!");
@@ -80,14 +97,14 @@ impl MovementController {
                 (speed_left, speed_right)
             };
 
-            right.command(Command::Queue(
+            right.raw(Command::Queue(
                 Command::To(
                     (distance * spec.error_wheel_right() * sign).deg().into(),
                     speed_right.dps().into(),
                 )
                 .into(),
             ))?;
-            left.command(Command::Queue(
+            left.raw(Command::Queue(
                 Command::To(
                     (distance * spec.error_wheel_left() * sign).deg().into(),
                     speed_left.dps().into(),
@@ -95,8 +112,8 @@ impl MovementController {
                 .into(),
             ))?;
 
-            right.command(Command::Execute)?;
-            left.command(Command::Execute)?;
+            right.raw(Command::Execute)?;
+            left.raw(Command::Execute)?;
 
             robot.handle_interrupt()?;
 
@@ -105,8 +122,8 @@ impl MovementController {
             thread::sleep(Duration::from_millis(10))
         }
 
-        right.command(Command::Stop(StopAction::Hold))?;
-        left.command(Command::Stop(StopAction::Hold))?;
+        right.raw(Command::Stop(StopAction::Hold))?;
+        left.raw(Command::Stop(StopAction::Hold))?;
 
         right.wait()?;
         left.wait()?;
@@ -184,15 +201,15 @@ impl MovementController {
 
             let (speed_left, speed_right) = turn_split(&turn, speed, spec);
 
-            right.command(Command::Queue(
+            right.raw(Command::Queue(
                 Command::To((dist_right * sign).deg().into(), speed_right.dps().into()).into(),
             ))?;
-            left.command(Command::Queue(
+            left.raw(Command::Queue(
                 Command::To((dist_left * sign).deg().into(), speed_left.dps().into()).into(),
             ))?;
 
-            right.command(Command::Execute)?;
-            left.command(Command::Execute)?;
+            right.raw(Command::Execute)?;
+            left.raw(Command::Execute)?;
 
             robot.handle_interrupt()?;
 
@@ -200,8 +217,8 @@ impl MovementController {
             thread::sleep(Duration::from_millis(10))
         }
 
-        right.command(Command::Stop(StopAction::Hold))?;
-        left.command(Command::Stop(StopAction::Hold))?;
+        right.raw(Command::Stop(StopAction::Hold))?;
+        left.raw(Command::Stop(StopAction::Hold))?;
 
         right.wait()?;
         left.wait()?;
@@ -210,6 +227,7 @@ impl MovementController {
     }
 }
 
+/// Returns the average position of the motors provided
 fn position(spec: &RobotSpec, motors: &[&dyn Motor]) -> Result<Degrees> {
     debug_assert!(!motors.is_empty());
 
@@ -226,6 +244,7 @@ fn position(spec: &RobotSpec, motors: &[&dyn Motor]) -> Result<Degrees> {
     Ok((sum / count).deg())
 }
 
+/// Helper to calculate what each wheel should do in a turn
 fn turn_split(turn_type: &TurnType, val: f32, spec: &RobotSpec) -> (f32, f32) {
     match turn_type {
         TurnType::Right => (0.0, val * spec.error_wheel_right()),

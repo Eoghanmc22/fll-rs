@@ -57,7 +57,7 @@ pub enum Command {
     To(Distance, Speed),
 
     /// Spin for a set time
-    /// Takes time (seconds) and speed params
+    /// Takes time and speed params
     Time(Duration, Speed),
 
     /// Sets the motor's target speed
@@ -105,13 +105,14 @@ pub trait Robot: AngleProvider {
     /// Returns an error if an interrupt has been requested
     /// Otherwise, returns Ok(())
     ///
-    /// # Panics
-    ///
-    /// This function may panic if `distance` or `speed` equal 0
     fn drive(&self, distance: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()>;
 
     /// Turns the robot using the gyro sensor
     /// Guesses the turn type from the turn direction
+    ///
+    /// # Inputs
+    ///
+    /// `speed` should be greater than `0.0`
     ///
     /// # Returns
     ///
@@ -125,6 +126,10 @@ pub trait Robot: AngleProvider {
 
     /// Turns the robot
     /// Uses specified turn type using the gyro sensor
+    ///
+    /// # Inputs
+    ///
+    /// `speed` should be greater than `0.0`
     ///
     /// # Returns
     ///
@@ -174,8 +179,25 @@ pub trait ColorSensor {
 }
 
 pub trait Motor {
+    /// Spin for a set distance (relative)
+    fn dist(&self, dist: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
+        self.raw(Command::Distance(dist.into(), speed.into()))
+    }
+
+    /// Spin to a set angle (absolute)
+    ///
+    /// Position is in distance from last reset
+    fn to_pos(&self, position: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
+        self.raw(Command::To(dist.into(), speed.into()))
+    }
+
+    /// Spin for a set time
+    fn time(&self, duration: Duration, speed: impl Into<Speed>) -> Result<()> {
+        self.raw(Command::Time(duration, speed.into()))
+    }
+
     /// Start a motor movement
-    fn command(&self, command: Command) -> Result<()>;
+    fn raw(&self, command: Command) -> Result<()>;
 
     /// Waits until a motor is finished moving
     fn wait(&self) -> Result<()>;
