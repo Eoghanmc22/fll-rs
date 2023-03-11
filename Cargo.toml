@@ -3,26 +3,11 @@ name = "fll-rs"
 version = "0.1.0"
 edition = "2021"
 
-[profile.release]
-lto = true
-strip = "debuginfo"
-
 [dependencies]
-fll-rs-core = { path = "fll-rs-core" }
+anyhow = { version = "1", features = ["backtrace"] }
 
-[target.'cfg(target_arch = "arm")'.dependencies]
-fll-rs-lego = { path = "fll-rs-lego" }
+image = { version = "0.24", default-features = false }
+imageproc = { version = "0.23", default-features = false }
+rusttype = "0.9"
 
-[target.'cfg(not(target_arch = "arm"))'.dependencies]
-fll-rs-mock = { path = "fll-rs-mock" }
-
-[workspace]
-members = [
-    "fll-rs-core",
-    "fll-rs-lego",
-    "fll-rs-mock"
-]
-
-default-members = [
-    "fll-rs-core",
-]
+ev3dev-lang-rust = { version = "0.12", features = ["screen"] }

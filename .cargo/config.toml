@@ -1,6 +1,5 @@
 [build]
-# todo is there a target to replace x86_64-unknown-linux-gnu that always resolvs th the current machine
-target = ["armv5te-unknown-linux-musleabi", "x86_64-unknown-linux-gnu"]
+target = "armv5te-unknown-linux-musleabi"
 
 [target.armv5te-unknown-linux-musleabi]
 linker = "rust-lld"

@@ -1,7 +1,22 @@
-pub use fll_rs_core::*;
+#![feature(once_cell)]
 
-#[cfg(target_arch = "arm")]
-pub use fll_rs_lego::*;
+// TODO enable more linting rules
 
-#[cfg(not(target_arch = "arm"))]
-pub use fll_rs_mock::*;
+pub mod error;
+pub mod graphics;
+pub mod input;
+pub mod math;
+pub mod movement;
+pub mod profiler;
+pub mod robot;
+pub mod types;
+pub mod lego;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() {
+        let result = 2 + 2;
+        assert_eq!(result, 4);
+    }
+}
