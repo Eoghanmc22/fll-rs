@@ -32,8 +32,8 @@ impl TurnType {
 pub enum MotorId {
     DriveRight,
     DriveLeft,
-    AttachmentRight,
-    AttachmentLeft,
+    AttachmentA,
+    AttachmentD,
 }
 // todo support set-points
 /// A motor movement

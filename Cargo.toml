@@ -3,6 +3,10 @@ name = "fll-rs"
 version = "0.1.0"
 edition = "2021"
 
+[profile.release]
+lto = true
+strip = "debuginfo"
+
 [dependencies]
 fll-rs-core = { path = "fll-rs-core" }
 
