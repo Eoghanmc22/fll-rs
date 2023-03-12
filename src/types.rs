@@ -95,6 +95,7 @@ impl From<Milimeters> for Distance {
 pub enum Speed {
     DegreesPerSecond(DegreesPerSecond),
     MilimetersPerSecond(MilimetersPerSecond),
+    Percent(Percent),
 }
 
 impl Speed {
@@ -102,6 +103,7 @@ impl Speed {
         match self {
             Speed::DegreesPerSecond(val) => val,
             Speed::MilimetersPerSecond(val) => DegreesPerSecond(spec.mm_to_deg(val.0.mm()).0),
+            Speed::Percent(val) => DegreesPerSecond(val.0 * spec.max_speed().0),
         }
     }
 
@@ -109,6 +111,19 @@ impl Speed {
         match self {
             Speed::DegreesPerSecond(val) => MilimetersPerSecond(spec.deg_to_mm(val.0.deg()).0),
             Speed::MilimetersPerSecond(val) => val,
+            Speed::Percent(val) => {
+                MilimetersPerSecond(spec.deg_to_mm((val.0 * spec.max_speed().0).deg()).0)
+            }
+        }
+    }
+
+    pub fn to_pct(self, spec: &RobotSpec) -> Percent {
+        match self {
+            Speed::DegreesPerSecond(val) => Percent(val.0 / spec.max_speed().0),
+            Speed::MilimetersPerSecond(val) => {
+                Percent(spec.mm_to_deg(val.0.mm()).0 / spec.max_speed().0)
+            }
+            Speed::Percent(val) => val,
         }
     }
 }
@@ -122,6 +137,12 @@ impl From<DegreesPerSecond> for Speed {
 impl From<MilimetersPerSecond> for Speed {
     fn from(value: MilimetersPerSecond) -> Self {
         Speed::MilimetersPerSecond(value)
+    }
+}
+
+impl From<Percent> for Speed {
+    fn from(value: Percent) -> Self {
+        Speed::Percent(value)
     }
 }
 
@@ -183,6 +204,9 @@ pub trait UnitsExt {
 
     /// Converts this value to `Heading` (heading)
     fn angle(self) -> Heading;
+
+    /// Converts number from -100 -> 100 to percent
+    fn pct(self) -> Percent;
 }
 
 impl UnitsExt for f32 {
@@ -217,6 +241,10 @@ impl UnitsExt for f32 {
     fn angle(self) -> Heading {
         Heading(self)
     }
+
+    fn pct(self) -> Percent {
+        Percent(self / 100.0)
+    }
 }
 
 impl UnitsExt for i32 {
@@ -250,5 +278,9 @@ impl UnitsExt for i32 {
 
     fn angle(self) -> Heading {
         Heading(self as f32)
+    }
+
+    fn pct(self) -> Percent {
+        Percent(self as f32 / 100.0)
     }
 }
