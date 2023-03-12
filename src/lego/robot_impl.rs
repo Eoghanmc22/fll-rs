@@ -12,13 +12,14 @@ use ev3dev_lang_rust::motors::{MotorPort, TachoMotor as Ev3TachoMotor};
 use ev3dev_lang_rust::sensors::ColorSensor as Ev3ColorSensor;
 use ev3dev_lang_rust::sensors::GyroSensor as Ev3GyroSensor;
 use ev3dev_lang_rust::sensors::SensorPort;
-use ev3dev_lang_rust::Device;
 use ev3dev_lang_rust::{wait, Ev3Button, Port, PowerSupply};
+use ev3dev_lang_rust::{Attribute, Device};
 use fxhash::FxHashMap as HashMap;
 use std::cell::{RefCell, RefMut};
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
+use std::thread;
 use std::time::Duration;
 
 pub struct LegoRobot {
@@ -32,6 +33,7 @@ pub struct LegoRobot {
     angle_algorithm: AngleAlgorithm,
 
     motors: HashMap<MotorId, RefCell<LegoMotor>>,
+    motor_definitions: Vec<(MotorId, MotorPort)>,
     sensors: HashMap<String, LegoSensor>,
 
     spec: Rc<RobotSpec>,
@@ -82,66 +84,45 @@ impl LegoRobot {
 
         let buttons = Ev3Button::new().context("Couldn't find buttons")?;
         let input = Default::default();
-        let input_raw = File::open("/dev/input/by-path/platform-gpio_keys-event")?;
+        let buttons_raw = File::open("/dev/input/by-path/platform-gpio_keys-event")?;
 
         let controller = MovementController::new(pid_config);
 
         let spec = Rc::new(spec);
 
-        let mut motors = HashMap::default();
-        for (motor_id, port) in motor_definitions {
-            let motor = Ev3TachoMotor::get(*port)
-                .with_context(|| format!("Couldn't find motor {:?}, port {:?}", motor_id, port))?;
-            motors.insert(
-                *motor_id,
-                LegoMotor {
-                    motor,
-                    queued_command: None,
-                    stopping_action: None,
-                    speed_sp: None,
-                    time_sp: None,
-                    position_sp: None,
-                    spec: spec.clone(),
-                }
-                .into(),
-            );
-        }
+        // Discover motors
+        let motor_definitions: Vec<_> = motor_definitions.into();
+        let motors =
+            discover_motors(&motor_definitions, spec.clone()).context("Discover motors")?;
 
-        let mut sensors = HashMap::default();
-        for color_sensor in Ev3ColorSensor::list().context("Find color sensors")? {
-            let address = color_sensor.get_address()?;
-            sensors.insert(
-                address,
-                LegoSensor::Color(
-                    init_color_sensor(color_sensor)
-                        .context("Init color sensor")?
-                        .into(),
-                ),
-            );
-        }
-        for gyro_sensor in Ev3GyroSensor::list().context("Find gyro sensors")? {
-            let address = gyro_sensor.get_address()?;
-            sensors.insert(
-                address,
-                LegoSensor::Gyro(
-                    init_gyro_sensor(gyro_sensor)
-                        .context("Init gyro sensor")?
-                        .into(),
-                ),
-            );
-        }
+        // Discover sensors
+        let sensors = discover_sensors().context("Discover sensors")?;
 
         Ok(Self {
             battery,
             buttons,
             input,
-            buttons_raw: input_raw,
+            buttons_raw,
             controller,
             motors,
             spec,
             angle_algorithm,
             sensors,
+            motor_definitions,
         })
+    }
+
+    pub fn rediscover_motors(&mut self) -> Result<()> {
+        self.motors = discover_motors(&self.motor_definitions, self.spec.clone())
+            .context("Discover motors")?;
+
+        Ok(())
+    }
+
+    pub fn rediscover_sensors(&mut self) -> Result<()> {
+        self.sensors = discover_sensors().context("Discover sensors")?;
+
+        Ok(())
     }
 }
 
@@ -231,7 +212,7 @@ impl Robot for LegoRobot {
         for sensor in self.sensors.values() {
             match sensor {
                 LegoSensor::Gyro(gyro) => {
-                    reset_gyro(&mut *gyro.borrow_mut())?;
+                    reset_gyro_soft(&mut *gyro.borrow_mut())?;
                 }
                 LegoSensor::Color(_) => {}
             }
@@ -353,7 +334,7 @@ impl LegoMotor {
 
                 if Some(dps) != self.speed_sp {
                     self.motor.set_speed_sp(dps).context("Set speed setpoint")?;
-                    self.speed_sp = Some(dps);
+                    self.speed_sp = Some(dps)
                 }
 
                 if execute {
@@ -470,6 +451,62 @@ impl ColorSensor for LegoColorSensor {
     }
 }
 
+fn discover_motors(
+    motor_definitions: &[(MotorId, MotorPort)],
+    spec: Rc<RobotSpec>,
+) -> Result<HashMap<MotorId, RefCell<LegoMotor>>> {
+    let mut motors = HashMap::default();
+
+    for (motor_id, port) in motor_definitions {
+        let motor = Ev3TachoMotor::get(*port)
+            .with_context(|| format!("Couldn't find motor {:?}, port {:?}", motor_id, port))?;
+        motors.insert(
+            *motor_id,
+            LegoMotor {
+                motor,
+                queued_command: None,
+                stopping_action: None,
+                speed_sp: None,
+                time_sp: None,
+                position_sp: None,
+                spec: spec.clone(),
+            }
+            .into(),
+        );
+    }
+
+    Ok(motors)
+}
+
+fn discover_sensors() -> Result<HashMap<String, LegoSensor>> {
+    let mut sensors = HashMap::default();
+
+    for color_sensor in Ev3ColorSensor::list().context("Find color sensors")? {
+        let address = color_sensor.get_address()?;
+        sensors.insert(
+            address,
+            LegoSensor::Color(
+                init_color_sensor(color_sensor)
+                    .context("Init color sensor")?
+                    .into(),
+            ),
+        );
+    }
+    for gyro_sensor in Ev3GyroSensor::list().context("Find gyro sensors")? {
+        let address = gyro_sensor.get_address()?;
+        sensors.insert(
+            address,
+            LegoSensor::Gyro(
+                init_gyro_sensor(gyro_sensor)
+                    .context("Init gyro sensor")?
+                    .into(),
+            ),
+        );
+    }
+
+    Ok(sensors)
+}
+
 fn init_color_sensor(color: Ev3ColorSensor) -> Result<LegoColorSensor> {
     color
         .set_mode_col_reflect()
@@ -486,11 +523,52 @@ fn init_gyro_sensor(gyro: Ev3GyroSensor) -> Result<LegoGyroSensor> {
     gyro.set_mode_gyro_ang().context("Set gyro sensor mode")?;
 
     let mut gyro = LegoGyroSensor { gyro };
-    reset_gyro(&mut gyro).context("Reset gyro")?;
+
+    reset_gyro_hard(&mut gyro).context("Reset gyro hard")?;
+    reset_gyro_soft(&mut gyro).context("Reset gyro soft")?;
 
     Ok(gyro)
 }
 
-fn reset_gyro(gyro: &mut LegoGyroSensor) -> Result<()> {
-    todo!("Proper reset it");
+fn reset_gyro_hard(gyro: &mut LegoGyroSensor) -> Result<()> {
+    let address = gyro.gyro.get_address().context("Get sensor address")?;
+
+    let mode = Attribute::from_path_with_discriminator(
+        "/sys/class/lego-port",
+        "/mode",
+        "/address",
+        address.as_str(),
+    )
+    .context("Get mode attribute")?;
+
+    mode.set_str_slice("other-uart")
+        .context("Hard reset gyro")?;
+    thread::sleep(Duration::from_millis(300));
+    mode.set_str_slice("auto").context("Hard reset gyro")?;
+
+    for _ in 0..10 {
+        let gyros = Ev3GyroSensor::list().context("Find gyro sensors")?;
+        for new_gyro in gyros {
+            if new_gyro
+                .get_address()
+                .context("Get new sensor address")?
+                .contains(&address)
+            {
+                gyro.gyro = new_gyro;
+            }
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    bail!("Gyro did not reconnect within 500ms")
+}
+
+fn reset_gyro_soft(gyro: &mut LegoGyroSensor) -> Result<()> {
+    gyro.gyro.set_mode_gyro_rate().context("Soft reset gyro")?;
+    gyro.gyro
+        .set_mode_gyro_ang()
+        .context("Set gyro sensor mode")?;
+
+    Ok(())
 }
