@@ -282,6 +282,7 @@ impl LegoMotor {
 
                 if Some(dps) != self.speed_sp {
                     self.motor.set_speed_sp(dps).context("Set speed setpoint")?;
+                    self.speed_sp = Some(dps);
                 }
 
                 if execute {
@@ -293,6 +294,7 @@ impl LegoMotor {
                     self.motor
                         .set_stop_action(action.to_str())
                         .context("Set stop action")?;
+                    self.stopping_action = Some(*action);
                 }
 
                 if execute {
@@ -307,10 +309,12 @@ impl LegoMotor {
                     self.motor
                         .set_position_sp(deg)
                         .context("Set position setpoint")?;
+                    self.position_sp = Some(deg);
                 }
 
                 if Some(dps) != self.speed_sp {
                     self.motor.set_speed_sp(dps).context("Set speed setpoint")?;
+                    self.speed_sp = Some(dps);
                 }
 
                 if execute {
@@ -325,10 +329,12 @@ impl LegoMotor {
                     self.motor
                         .set_position_sp(deg)
                         .context("Set position setpoint")?;
+                    self.position_sp = Some(deg);
                 }
 
                 if Some(dps) != self.speed_sp {
                     self.motor.set_speed_sp(dps).context("Set speed setpoint")?;
+                    self.speed_sp = Some(dps);
                 }
 
                 if execute {
@@ -342,10 +348,12 @@ impl LegoMotor {
                     self.motor
                         .set_time_sp(duration.as_millis() as i32)
                         .context("Set time setpoint")?;
+                    self.time_sp = Some(*duration);
                 }
 
                 if Some(dps) != self.speed_sp {
                     self.motor.set_speed_sp(dps).context("Set speed setpoint")?;
+                    self.speed_sp = Some(dps);
                 }
 
                 if execute {
