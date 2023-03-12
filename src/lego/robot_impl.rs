@@ -211,7 +211,7 @@ impl Robot for LegoRobot {
         for sensor in self.sensors.values() {
             match sensor {
                 LegoSensor::Gyro(gyro) => {
-                    reset_gyro_soft(&mut *gyro.borrow_mut())?;
+                    reset_gyro_soft(&mut gyro.borrow_mut())?;
                 }
                 LegoSensor::Color(_) => {}
             }
