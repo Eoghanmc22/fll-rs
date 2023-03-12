@@ -1,7 +1,12 @@
+use anyhow::{bail, Context};
+use ev3dev_lang_rust::motors::TachoMotor;
+use ev3dev_lang_rust::sensors::SensorPort;
+
 use crate::error::Result;
 use crate::input::Input;
 use crate::movement::spec::RobotSpec;
 use crate::types::{Distance, Heading, Percent, Speed};
+use std::cell::RefMut;
 use std::time::Duration;
 
 /// How the robot should turn
@@ -60,11 +65,6 @@ pub enum Command {
     /// Takes time and speed params
     Time(Duration, Speed),
 
-    /// Sets the motor's target speed
-    /// Useful for algorithms that need to dynamically adjust the motors speed
-    /// Takes duty cycle param (-100 to 100 percent power)
-    Direct(Percent),
-
     /// Queues a command to be ran when a `Execute` command is sent
     /// Queuing a command could allow it to be executed faster
     /// This could minimize "kick" when using 2 motors
@@ -86,6 +86,16 @@ pub enum StopAction {
     Break,
     /// Actively holds a motor's position
     Hold,
+}
+
+impl StopAction {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            StopAction::Coast => TachoMotor::STOP_ACTION_COAST,
+            StopAction::Break => TachoMotor::STOP_ACTION_BRAKE,
+            StopAction::Hold => TachoMotor::STOP_ACTION_HOLD,
+        }
+    }
 }
 
 /// Identifies a sensor
@@ -142,24 +152,34 @@ pub trait Robot: AngleProvider {
     fn turn_named(&self, angle: Heading, speed: impl Into<Speed>, turn: TurnType) -> Result<()>;
 
     /// Retereives a motor
-    fn motor(&self, motor: MotorId) -> &dyn Motor;
+    fn motor(&self, motor: MotorId) -> Option<RefMut<dyn Motor>>;
+
+    fn color_sensor(&self, port: SensorPort) -> Option<RefMut<dyn ColorSensor>>;
+
+    /// Returns the status of the robot's buttons
+    fn process_buttons(&self) -> Result<Input>;
+
+    /// Returns an error if an interrupt has been requested
+    /// Otherwise, returns Ok(())
+    fn handle_interrupt(&self) -> Result<()> {
+        let input = self.process_buttons().context("Process buttons")?;
+
+        if input.is_left() {
+            bail!("Interupt requested")
+        }
+
+        Ok(())
+    }
 
     /// Retrieves the battery percentage
     /// Ranges from 0.0 -> 1.0
     fn battery(&self) -> Result<Percent>;
 
-    /// Returns an error if an interrupt has been requested
-    /// Otherwise, returns Ok(())
-    fn handle_interrupt(&self) -> Result<()>;
-
-    /// Returns the status of the robot's buttons
-    fn process_buttons(&self) -> Result<Input>;
-
     /// Waits for the status of the robot's buttons and returns that new status
     fn await_input(&self) -> Result<Input>;
 
     /// Resets the robot's state
-    fn reset(&mut self) -> Result<()>;
+    fn reset(&self) -> Result<()>;
 
     /// Returns information about the robot
     fn spec(&self) -> &RobotSpec;
@@ -169,48 +189,59 @@ pub trait ColorSensor {
     /// Retrieves the light reflected into the color sensor
     fn reflected_light(&self) -> Result<Percent>;
 
-    // TODO color getter
-
     /// Sets the white (1.0) definition
-    fn cal_white(&self) -> Result<()>;
+    fn cal_white(&mut self) -> Result<()>;
 
     /// Sets the black (0.0) definition
-    fn cal_black(&self) -> Result<()>;
+    fn cal_black(&mut self) -> Result<()>;
+
+    /// Resets calibration data
+    fn reset(&mut self) -> Result<()>;
 }
 
 pub trait Motor {
-    /// Spin for a set distance (relative)
-    fn dist(&self, dist: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
-        self.raw(Command::Distance(dist.into(), speed.into()))
-    }
-
-    /// Spin to a set angle (absolute)
-    ///
-    /// Position is in distance from last reset
-    fn to_pos(&self, position: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
-        self.raw(Command::To(dist.into(), speed.into()))
-    }
-
-    /// Spin for a set time
-    fn time(&self, duration: Duration, speed: impl Into<Speed>) -> Result<()> {
-        self.raw(Command::Time(duration, speed.into()))
-    }
-
     /// Start a motor movement
-    fn raw(&self, command: Command) -> Result<()>;
+    fn raw(&mut self, command: Command) -> Result<()>;
+
+    /// Resets the angle of a motor to 0
+    /// this method sets the stopping action for implicit stops
+    fn motor_reset(&mut self, stop_action: Option<StopAction>) -> Result<()>;
 
     /// Waits until a motor is finished moving
-    fn wait(&self) -> Result<()>;
+    fn wait(&self, timeout: Option<Duration>) -> Result<()>;
 
     /// Retrieves the speed of a motor
     fn speed(&self) -> Result<Speed>;
 
     /// Retrieves the angle of a motor in distance from the last reset
     fn motor_angle(&self) -> Result<Distance>;
+}
 
-    /// Resets the angle of a motor to 0
-    /// this method sets the stopping action for implicit stops
-    fn motor_reset(&self, stopping_action: Option<StopAction>) -> Result<()>;
+pub trait MotorExt {
+    /// Spin for a set distance (relative)
+    fn dist(&mut self, dist: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()>;
+
+    /// Spin to a set angle (absolute)
+    ///
+    /// Position is in distance from last reset
+    fn to_pos(&mut self, position: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()>;
+
+    /// Spin for a set time
+    fn time(&mut self, duration: Duration, speed: impl Into<Speed>) -> Result<()>;
+}
+
+impl<M: Motor> MotorExt for M {
+    fn dist(&mut self, dist: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
+        self.raw(Command::Distance(dist.into(), speed.into()))
+    }
+
+    fn to_pos(&mut self, position: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
+        self.raw(Command::To(position.into(), speed.into()))
+    }
+
+    fn time(&mut self, duration: Duration, speed: impl Into<Speed>) -> Result<()> {
+        self.raw(Command::Time(duration, speed.into()))
+    }
 }
 
 pub trait AngleProvider {

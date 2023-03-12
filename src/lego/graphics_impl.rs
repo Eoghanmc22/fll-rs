@@ -7,10 +7,10 @@ pub struct LegoDisplay {
 }
 
 impl LegoDisplay {
-    pub fn new() -> Result<()> {
+    pub fn new() -> Result<Self> {
         let screen = Screen::new()?;
 
-        LegoDisplay { screen }
+        Ok(LegoDisplay { screen })
     }
 }
 

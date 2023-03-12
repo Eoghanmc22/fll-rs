@@ -5,12 +5,11 @@
 pub mod error;
 pub mod graphics;
 pub mod input;
+pub mod lego;
 pub mod math;
 pub mod movement;
-pub mod profiler;
 pub mod robot;
 pub mod types;
-pub mod lego;
 
 #[cfg(test)]
 mod tests {

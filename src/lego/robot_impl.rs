@@ -4,47 +4,71 @@ use crate::movement::controller::MovementController;
 use crate::movement::pid::PidConfig;
 use crate::movement::spec::RobotSpec;
 use crate::robot::{
-    AngleProvider, ColorSensor, Command, DualColorSensor, MotorId, Robot, StopAction, TurnType,
+    AngleProvider, ColorSensor, Command, Motor, MotorId, Robot, StopAction, TurnType,
 };
+use crate::types::{Degrees, DegreesPerSecond, Distance, Heading, Percent, Speed};
 use anyhow::{bail, Context};
-use ev3dev_lang_rust::motors::{MotorPort, TachoMotor};
+use ev3dev_lang_rust::motors::{MotorPort, TachoMotor as Ev3TachoMotor};
 use ev3dev_lang_rust::sensors::ColorSensor as Ev3ColorSensor;
 use ev3dev_lang_rust::sensors::GyroSensor as Ev3GyroSensor;
 use ev3dev_lang_rust::sensors::SensorPort;
-use ev3dev_lang_rust::{wait, Ev3Button, PowerSupply};
-use std::cell::RefCell;
-use std::collections::HashMap;
+use ev3dev_lang_rust::Device;
+use ev3dev_lang_rust::{wait, Ev3Button, Port, PowerSupply};
+use fxhash::FxHashMap as HashMap;
+use std::cell::{RefCell, RefMut};
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
-use std::thread;
+use std::rc::Rc;
 use std::time::Duration;
 
 pub struct LegoRobot {
     battery: PowerSupply,
 
     buttons: Ev3Button,
+    buttons_raw: File,
     input: RefCell<Input>,
-    input_raw: File,
 
     controller: MovementController,
+    angle_algorithm: AngleAlgorithm,
 
-    motors: HashMap<MotorId, (TachoMotor, RefCell<MotorHandler>)>,
+    motors: HashMap<MotorId, RefCell<LegoMotor>>,
+    sensors: HashMap<String, LegoSensor>,
 
-    spec: RobotSpec,
+    spec: Rc<RobotSpec>,
 }
 
-#[derive(Default)]
-struct MotorHandler {
+pub enum AngleAlgorithm {
+    Wheel,
+    Gyro(SensorPort),
+}
+
+enum LegoSensor {
+    Gyro(RefCell<LegoGyroSensor>),
+    Color(RefCell<LegoColorSensor>),
+}
+
+struct LegoMotor {
+    motor: Ev3TachoMotor,
+
     queued_command: Option<Command>,
 
     stopping_action: Option<StopAction>,
 
     speed_sp: Option<i32>,
-    duty_cycle_sp: Option<i32>,
     time_sp: Option<Duration>,
     position_sp: Option<i32>,
 
-    direct: bool,
+    spec: Rc<RobotSpec>,
+}
+
+struct LegoGyroSensor {
+    gyro: Ev3GyroSensor,
+}
+
+struct LegoColorSensor {
+    color: Ev3ColorSensor,
+    white: f32,
+    black: f32,
 }
 
 impl LegoRobot {
@@ -52,10 +76,8 @@ impl LegoRobot {
         motor_definitions: &[(MotorId, MotorPort)],
         pid_config: PidConfig,
         spec: RobotSpec,
+        angle_algorithm: AngleAlgorithm,
     ) -> Result<Self> {
-        let gyro_sensor = Default::default();
-        let color_sensor = Default::default();
-
         let battery = PowerSupply::new().context("Couldn't find power supply")?;
 
         let buttons = Ev3Button::new().context("Couldn't find buttons")?;
@@ -64,361 +86,159 @@ impl LegoRobot {
 
         let controller = MovementController::new(pid_config);
 
-        let mut motors = HashMap::new();
+        let spec = Rc::new(spec);
 
+        let mut motors = HashMap::default();
         for (motor_id, port) in motor_definitions {
-            let motor = TachoMotor::get(*port)
+            let motor = Ev3TachoMotor::get(*port)
                 .with_context(|| format!("Couldn't find motor {:?}, port {:?}", motor_id, port))?;
-            let handler = RefCell::new(MotorHandler::default());
+            motors.insert(
+                *motor_id,
+                LegoMotor {
+                    motor,
+                    queued_command: None,
+                    stopping_action: None,
+                    speed_sp: None,
+                    time_sp: None,
+                    position_sp: None,
+                    spec: spec.clone(),
+                }
+                .into(),
+            );
+        }
 
-            motors.insert(*motor_id, (motor, handler));
+        let mut sensors = HashMap::default();
+        for color_sensor in Ev3ColorSensor::list().context("Find color sensors")? {
+            let address = color_sensor.get_address()?;
+            sensors.insert(
+                address,
+                LegoSensor::Color(
+                    init_color_sensor(color_sensor)
+                        .context("Init color sensor")?
+                        .into(),
+                ),
+            );
+        }
+        for gyro_sensor in Ev3GyroSensor::list().context("Find gyro sensors")? {
+            let address = gyro_sensor.get_address()?;
+            sensors.insert(
+                address,
+                LegoSensor::Gyro(
+                    init_gyro_sensor(gyro_sensor)
+                        .context("Init gyro sensor")?
+                        .into(),
+                ),
+            );
         }
 
         Ok(Self {
-            gyro_sensor,
-            color_sensor,
             battery,
             buttons,
             input,
-            input_raw,
+            buttons_raw: input_raw,
             controller,
             motors,
             spec,
+            angle_algorithm,
+            sensors,
         })
     }
 }
 
-impl<Gyro: GyroSensorType + Default> LegoRobot<Gyro, HasDualColorSensor> {
-    pub fn new_dual_color_sensor(
-        left_color_sensor: SensorPort,
-        right_color_sensor: SensorPort,
-        motor_definitions: &[(MotorId, MotorPort)],
-        pid_config: PidConfig,
-        spec: RobotSpec,
-    ) -> Result<Self> {
-        let gyro_sensor = Default::default();
-        let color_sensor = HasDualColorSensor {
-            left: HasColorSensor {
-                port: Some(left_color_sensor),
-                ..Default::default()
-            },
-            right: HasColorSensor {
-                port: Some(right_color_sensor),
-                ..Default::default()
-            },
-            _private: Private,
-        };
+impl Robot for LegoRobot {
+    fn drive(&self, distance: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
+        self.controller.drive(
+            self,
+            distance.into().to_deg(&self.spec),
+            speed.into().to_dps(&self.spec),
+        )
+    }
 
-        let battery = PowerSupply::new().context("Couldn't find power supply")?;
+    fn turn(&self, angle: Heading, speed: impl Into<Speed>) -> Result<()> {
+        self.controller
+            .turn(self, angle, speed.into().to_dps(&self.spec))
+    }
 
-        let buttons = Ev3Button::new().context("Couldn't find buttons")?;
-        let input = Default::default();
-        let wait_file = File::open("/dev/input/by-path/platform-gpio_keys-event")?;
+    fn turn_named(&self, angle: Heading, speed: impl Into<Speed>, turn: TurnType) -> Result<()> {
+        self.controller
+            .turn_named(self, angle, speed.into().to_dps(&self.spec), turn)
+    }
 
-        let controller = MovementController::new(pid_config);
+    fn motor(&self, motor_id: MotorId) -> Option<RefMut<dyn Motor>> {
+        let motor = self.motors.get(&motor_id);
 
-        let mut motors = HashMap::new();
-
-        for (motor_id, port) in motor_definitions {
-            let motor = TachoMotor::get(*port)
-                .with_context(|| format!("Couldn't find motor {:?}, port {:?}", motor_id, port))?;
-            let handler = RefCell::new(MotorHandler::default());
-
-            motors.insert(*motor_id, (motor, handler));
+        if let Some(motor) = motor {
+            Some(motor.borrow_mut())
+        } else {
+            None
         }
-
-        Ok(Self {
-            gyro_sensor,
-            color_sensor,
-            battery,
-            buttons,
-            input,
-            input_raw: wait_file,
-            controller,
-            motors,
-            spec,
-        })
     }
-}
 
-// LegoRobot always implements AngleProvider but the compiler doesnt know that
-impl<Gyro: GyroSensorType, Color: ColorSensorType> LegoRobot<Gyro, Color>
-where
-    LegoRobot<Gyro, Color>: AngleProvider,
-{
-    pub fn reset(&self) -> Result<()> {
-        for motor in self.motors.keys() {
-            self.motor_reset(*motor, None)
-                .with_context(|| format!("Couldn't reset motor {:?}", motor))?;
+    fn color_sensor(&self, port: SensorPort) -> Option<RefMut<dyn ColorSensor>> {
+        let sensor = self.sensors.get(&port.address());
+
+        if let Some(LegoSensor::Color(color)) = sensor {
+            Some(color.borrow_mut())
+        } else {
+            None
         }
-
-        // todo how to reset gyro
-        // todo should this panic in a mission?
-
-        Ok(())
-    }
-
-    // todo setters for pid, etc
-}
-
-// LegoRobot always implements AngleProvider but the compiler doesnt know that
-impl<Gyro: GyroSensorType, Color: ColorSensorType> Robot for LegoRobot<Gyro, Color>
-where
-    LegoRobot<Gyro, Color>: AngleProvider,
-{
-    fn drive(&self, distance: i32, speed: i32) -> Result<()> {
-        self.controller.drive(self, distance, speed)
-    }
-
-    fn turn(&self, angle: i32, speed: i32) -> Result<()> {
-        self.controller.turn(self, angle, speed)
-    }
-
-    fn turn_named(&self, angle: i32, speed: i32, turn: TurnType) -> Result<()> {
-        self.controller.turn_named(self, angle, speed, turn)
-    }
-
-    fn motor(&self, motor_id: MotorId, cmd: Command) -> Result<()> {
-        let (motor, motor_handler) = self
-            .motors
-            .get(&motor_id)
-            .with_context(|| format!("No {:?} motor", motor_id))?;
-        let motor_handler = &mut *motor_handler.borrow_mut();
-
-        let (sp, run) = match cmd {
-            Command::Queue(_) => (true, false),
-            Command::Execute => (false, true),
-            _ => {
-                motor_handler.queued_command = None;
-                (true, true)
-            }
-        };
-
-        match cmd {
-            Command::On(speed) => {
-                if sp && Some(speed) != motor_handler.speed_sp {
-                    motor.set_speed_sp(speed).with_context(|| {
-                        format!("Couldn't write property, motor {:?}", motor_id)
-                    })?;
-
-                    motor_handler.speed_sp = Some(speed);
-                }
-                if run {
-                    motor
-                        .run_forever()
-                        .with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
-
-                    motor_handler.direct = false;
-                }
-            }
-            Command::Stop(stopping_action) => {
-                if sp && Some(stopping_action) != motor_handler.stopping_action {
-                    let name = stop_action_name(stopping_action);
-
-                    motor.set_stop_action(name).with_context(|| {
-                        format!("Couldn't write property, motor {:?}", motor_id)
-                    })?;
-                }
-                if run {
-                    motor
-                        .stop()
-                        .with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
-
-                    motor_handler.direct = false;
-                }
-            }
-            Command::Distance(distance, speed) => {
-                if sp {
-                    if Some(distance) != motor_handler.position_sp {
-                        motor.set_position_sp(distance).with_context(|| {
-                            format!("Couldn't write property, motor {:?}", motor_id)
-                        })?;
-                    }
-
-                    if Some(speed) != motor_handler.speed_sp {
-                        motor.set_speed_sp(speed).with_context(|| {
-                            format!("Couldn't write property, motor {:?}", motor_id)
-                        })?;
-                    }
-                }
-                if run {
-                    motor
-                        .run_to_rel_pos(None)
-                        .with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
-
-                    motor_handler.direct = false;
-                }
-            }
-            Command::To(position, speed) => {
-                if sp {
-                    if Some(position) != motor_handler.position_sp {
-                        motor.set_position_sp(position).with_context(|| {
-                            format!("Couldn't write property, motor {:?}", motor_id)
-                        })?;
-                    }
-
-                    if Some(speed) != motor_handler.speed_sp {
-                        motor.set_speed_sp(speed).with_context(|| {
-                            format!("Couldn't write property, motor {:?}", motor_id)
-                        })?;
-                    }
-                }
-                if run {
-                    motor
-                        .run_to_abs_pos(None)
-                        .with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
-
-                    motor_handler.direct = false;
-                }
-            }
-            Command::Time(duration, speed) => {
-                if sp {
-                    if Some(duration) != motor_handler.time_sp {
-                        motor
-                            .set_time_sp(duration.as_millis() as i32)
-                            .with_context(|| {
-                                format!("Couldn't write property, motor {:?}", motor_id)
-                            })?;
-                    }
-
-                    if Some(speed) != motor_handler.speed_sp {
-                        motor.set_speed_sp(speed).with_context(|| {
-                            format!("Couldn't write property, motor {:?}", motor_id)
-                        })?;
-                    }
-                }
-                if run {
-                    motor
-                        .run_timed(None)
-                        .with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
-
-                    motor_handler.direct = false;
-                }
-            }
-            Command::Direct(duty_cycle) => {
-                if sp && Some(duty_cycle) != motor_handler.duty_cycle_sp {
-                    motor.set_duty_cycle_sp(duty_cycle).with_context(|| {
-                        format!("Couldn't write property, motor {:?}", motor_id)
-                    })?;
-                }
-
-                if run && !motor_handler.direct {
-                    motor
-                        .run_direct()
-                        .with_context(|| format!("Couldn't send command, motor {:?}", motor_id))?;
-
-                    motor_handler.direct = true;
-                }
-            }
-            _ => {}
-        }
-
-        Ok(())
-    }
-
-    fn wait(&self, motor_id: MotorId) -> Result<()> {
-        let (motor, _) = self
-            .motors
-            .get(&motor_id)
-            .with_context(|| format!("No {:?} motor", motor_id))?;
-
-        motor.wait_until_not_moving(None);
-
-        Ok(())
-    }
-
-    fn speed(&self, motor_id: MotorId) -> Result<i32> {
-        let (motor, _) = self
-            .motors
-            .get(&motor_id)
-            .with_context(|| format!("No {:?} motor", motor_id))?;
-
-        motor
-            .get_speed()
-            .with_context(|| format!("Couldn't read property, motor {:?}", motor_id))
-    }
-
-    fn motor_angle(&self, motor_id: MotorId) -> Result<i32> {
-        let (motor, _) = self
-            .motors
-            .get(&motor_id)
-            .with_context(|| format!("No {:?} motor", motor_id))?;
-
-        motor
-            .get_position()
-            .with_context(|| format!("Couldn't read property, motor {:?}", motor_id))
-    }
-
-    // Todo should this be a "virtual" reset or a real one?
-    fn motor_reset(&self, motor_id: MotorId, stopping_action: Option<StopAction>) -> Result<()> {
-        let (motor, _) = self
-            .motors
-            .get(&motor_id)
-            .with_context(|| format!("No {:?} motor", motor_id))?;
-
-        motor
-            .reset()
-            .with_context(|| format!("Couldn't reset motor {:?}", motor))?;
-
-        if let Some(stopping_action) = stopping_action {
-            motor
-                .set_stop_action(stop_action_name(stopping_action))
-                .with_context(|| format!("Couldn't write property, motor {:?}", motor))?;
-        }
-
-        Ok(())
-    }
-
-    fn battery(&self) -> Result<f32> {
-        // todo should this adjust for min voltage???
-        let max = self
-            .battery
-            .get_voltage_max_design()
-            .context("Couldn't read battery")?;
-        let now = self
-            .battery
-            .get_voltage_now()
-            .context("Couldn't read battery")?;
-
-        Ok(now as f32 / max as f32)
-    }
-
-    fn handle_interrupt(&self) -> Result<()> {
-        self.buttons.process();
-
-        if self.buttons.is_left() {
-            bail!("Interrupt requested");
-        }
-
-        Ok(())
     }
 
     fn process_buttons(&self) -> Result<Input> {
-        {
-            self.buttons.process();
+        self.buttons.process();
 
-            let mut state = [false; 6];
-            state[Input::UP] = self.buttons.is_up();
-            state[Input::DOWN] = self.buttons.is_down();
-            state[Input::LEFT] = self.buttons.is_left();
-            state[Input::RIGHT] = self.buttons.is_right();
-            state[Input::ENTER] = self.buttons.is_enter();
-            state[Input::BACKSPACE] = self.buttons.is_backspace();
+        let mut state = [false; 6];
 
-            self.input.borrow_mut().update(state);
-        }
+        state[Input::UP] = self.buttons.is_up();
+        state[Input::DOWN] = self.buttons.is_down();
+        state[Input::LEFT] = self.buttons.is_left();
+        state[Input::RIGHT] = self.buttons.is_right();
+        state[Input::ENTER] = self.buttons.is_enter();
+        state[Input::BACKSPACE] = self.buttons.is_backspace();
+
+        self.input.borrow_mut().update(state);
 
         Ok(self.input.borrow().clone())
     }
 
+    fn battery(&self) -> Result<Percent> {
+        let min = self
+            .battery
+            .get_voltage_min_design()
+            .context("Get min voltage")? as f32;
+        let max = self
+            .battery
+            .get_voltage_max_design()
+            .context("Get max voltage")? as f32;
+        let current = self.battery.get_voltage_now().context("Get voltage")? as f32;
+
+        Ok(Percent((current - min) / (max - min)))
+    }
+
     fn await_input(&self) -> Result<Input> {
-        wait::wait(self.input_raw.as_raw_fd(), || true, None);
+        wait::wait(self.buttons_raw.as_raw_fd(), || true, None);
 
         self.process_buttons()
     }
 
-    fn reset(&mut self) -> Result<()> {
-        todo!()
+    fn reset(&self) -> Result<()> {
+        for motor in self.motors.values() {
+            motor
+                .borrow_mut()
+                .motor_reset(None)
+                .context("Reset motor")?;
+        }
+        for sensor in self.sensors.values() {
+            match sensor {
+                LegoSensor::Gyro(gyro) => {
+                    reset_gyro(&mut *gyro.borrow_mut())?;
+                }
+                LegoSensor::Color(_) => {}
+            }
+        }
+        *self.input.borrow_mut() = Default::default();
+
+        Ok(())
     }
 
     fn spec(&self) -> &RobotSpec {
@@ -426,205 +246,243 @@ where
     }
 }
 
-fn stop_action_name(stopping_action: StopAction) -> &'static str {
-    match stopping_action {
-        StopAction::Coast => TachoMotor::STOP_ACTION_COAST,
-        StopAction::Break => TachoMotor::STOP_ACTION_BRAKE,
-        StopAction::Hold => TachoMotor::STOP_ACTION_HOLD,
+impl AngleProvider for LegoRobot {
+    fn angle(&self) -> Result<Heading> {
+        match self.angle_algorithm {
+            AngleAlgorithm::Wheel => {
+                let left = self
+                    .motor(MotorId::DriveLeft)
+                    .context("Left motor")?
+                    .motor_angle()?;
+                let right = self
+                    .motor(MotorId::DriveRight)
+                    .context("Right motor")?
+                    .motor_angle()?;
+
+                Ok(self.spec().get_approx_angle(left, right))
+            }
+            AngleAlgorithm::Gyro(port) => {
+                let sensor = self.sensors.get(&port.address()).context("No gyro found")?;
+
+                if let LegoSensor::Gyro(gyro) = sensor {
+                    Ok(Heading(gyro.borrow().gyro.get_angle()? as f32))
+                } else {
+                    bail!("Sensor in {port:?} is not a gyro sensor");
+                }
+            }
+        }
     }
 }
 
-#[derive(Default)]
-struct Private;
+impl LegoMotor {
+    fn handle_command(&mut self, command: &Command, execute: bool) -> Result<()> {
+        match command {
+            Command::On(speed) => {
+                let dps = speed.to_dps(&self.spec).0 as i32;
 
-// todo better naming
-#[derive(Default)]
-pub struct HasGyroSensor {
-    sensor: RefCell<Option<Ev3GyroSensor>>,
-    port: Option<SensorPort>,
+                if Some(dps) != self.speed_sp {
+                    self.motor.set_speed_sp(dps).context("Set speed setpoint")?;
+                }
 
-    _private: Private,
-}
+                if execute {
+                    self.motor.run_forever().context("Run forever")?;
+                }
+            }
+            Command::Stop(action) => {
+                if Some(*action) != self.stopping_action {
+                    self.motor
+                        .set_stop_action(action.to_str())
+                        .context("Set stop action")?;
+                }
 
-#[derive(Default)]
-pub struct NoGyroSensor(Private);
+                if execute {
+                    self.motor.stop().context("Stop motor")?;
+                }
+            }
+            Command::Distance(distance, speed) => {
+                let deg = distance.to_deg(&self.spec).0 as i32;
+                let dps = speed.to_dps(&self.spec).0 as i32;
 
-pub trait GyroSensorType {}
-impl GyroSensorType for HasGyroSensor {}
-impl GyroSensorType for NoGyroSensor {}
+                if Some(deg) != self.position_sp {
+                    self.motor
+                        .set_position_sp(deg)
+                        .context("Set position setpoint")?;
+                }
 
-impl<C: ColorSensorType> AngleProvider for LegoRobot<NoGyroSensor, C> {
-    fn angle(&self) -> Result<f32> {
-        let left = self.motor_angle(MotorId::DriveLeft)? as f32;
-        let right = self.motor_angle(MotorId::DriveRight)? as f32;
+                if Some(dps) != self.speed_sp {
+                    self.motor.set_speed_sp(dps).context("Set speed setpoint")?;
+                }
 
-        Ok(self.spec().get_approx_angle(left, right))
+                if execute {
+                    self.motor.run_to_rel_pos(None).context("Run relative")?;
+                }
+            }
+            Command::To(position, speed) => {
+                let deg = position.to_deg(&self.spec).0 as i32;
+                let dps = speed.to_dps(&self.spec).0 as i32;
+
+                if Some(deg) != self.position_sp {
+                    self.motor
+                        .set_position_sp(deg)
+                        .context("Set position setpoint")?;
+                }
+
+                if Some(dps) != self.speed_sp {
+                    self.motor.set_speed_sp(dps).context("Set speed setpoint")?;
+                }
+
+                if execute {
+                    self.motor.run_to_abs_pos(None).context("Run absloute")?;
+                }
+            }
+            Command::Time(duration, speed) => {
+                let dps = speed.to_dps(&self.spec).0 as i32;
+
+                if Some(*duration) != self.time_sp {
+                    self.motor
+                        .set_time_sp(duration.as_millis() as i32)
+                        .context("Set time setpoint")?;
+                }
+
+                if Some(dps) != self.speed_sp {
+                    self.motor.set_speed_sp(dps).context("Set speed setpoint")?;
+                }
+
+                if execute {
+                    self.motor.run_timed(None).context("Run timed")?;
+                }
+            }
+            command => panic!("Got bad command {command:?}"),
+        }
+
+        Ok(())
     }
 }
 
-impl<C: ColorSensorType> AngleProvider for LegoRobot<HasGyroSensor, C> {
-    fn angle(&self) -> Result<f32> {
-        fn create_gyro_sensor(port: Option<SensorPort>) -> Result<Ev3GyroSensor> {
-            let gyro = if let Some(port) = port {
-                Ev3GyroSensor::get(port)
-                    .with_context(|| format!("No gyro sensor on port {:?}", port))?
-            } else {
-                Ev3GyroSensor::find().context("No gyro sensor connected")?
-            };
-
-            gyro.set_mode_gyro_ang().context("Couldn't set gyro mode")?;
-
-            // todo is this needed?
-            while !gyro
-                .is_mode_gyro_ang()
-                .context("Couldn't check gyro mode")?
-            {
-                thread::sleep(Duration::from_millis(2));
-            }
-
-            Ok(gyro)
-        }
-
-        let cached_sensor = &mut *self.gyro_sensor.sensor.borrow_mut();
-
-        if let Some(inner) = cached_sensor {
-            if let Ok(angle) = inner.get_angle() {
-                return Ok(angle as f32);
+impl Motor for LegoMotor {
+    fn raw(&mut self, command: Command) -> Result<()> {
+        // Clear queued action if needed
+        match command {
+            Command::Queue(_) | Command::Execute => {}
+            _ => {
+                self.queued_command = None;
             }
         }
 
-        let gyro = create_gyro_sensor(self.gyro_sensor.port)?;
-        let angle = gyro.get_angle().context("Couldn't read gyro")?;
+        match command {
+            Command::Queue(queued_command) => {
+                self.handle_command(&queued_command, false)?;
 
-        *cached_sensor = Some(gyro);
-
-        Ok(angle as f32)
-    }
-}
-
-pub struct HasDualColorSensor {
-    left: HasColorSensor,
-    right: HasColorSensor,
-    _private: Private,
-}
-
-#[derive(Default)]
-pub struct HasColorSensor {
-    sensor: RefCell<Option<Ev3ColorSensor>>,
-    port: Option<SensorPort>,
-
-    white: RefCell<f32>,
-    black: RefCell<f32>,
-
-    _private: Private,
-}
-
-#[derive(Default)]
-pub struct NoColorSensor(Private);
-
-pub trait ColorSensorType {}
-impl ColorSensorType for NoColorSensor {}
-impl ColorSensorType for HasColorSensor {}
-impl ColorSensorType for HasDualColorSensor {}
-
-impl ColorSensor for HasColorSensor {
-    fn reflected_light(&self) -> Result<f32> {
-        fn create_color_sensor(port: Option<SensorPort>) -> Result<Ev3ColorSensor> {
-            let color_sensor = if let Some(port) = port {
-                Ev3ColorSensor::get(port)
-                    .with_context(|| format!("No color sensor on port {:?}", port))?
-            } else {
-                Ev3ColorSensor::find().context("No color sensor connected")?
-            };
-
-            color_sensor
-                .set_mode_col_reflect()
-                .context("Couldn't set color sensor mode")?;
-
-            // todo is this needed?
-            while !color_sensor
-                .is_mode_col_color()
-                .context("Couldn't check color sensor mode")?
-            {
-                thread::sleep(Duration::from_millis(2));
+                self.queued_command = Some(*queued_command);
             }
-
-            Ok(color_sensor)
-        }
-
-        let cached_sensor = &mut *self.sensor.borrow_mut();
-
-        if let Some(inner) = cached_sensor {
-            if let Ok(reflected_light) = inner.get_color() {
-                return Ok(reflected_light as f32);
+            Command::Execute => {
+                if let Some(queued_command) = self.queued_command.take() {
+                    self.handle_command(&queued_command, true)?;
+                } else {
+                    bail!("Reveived `Command::Execute` when no command was queued");
+                }
+            }
+            command => {
+                self.handle_command(&command, true)?;
             }
         }
-
-        let color_sensor = create_color_sensor(self.port)?;
-        let angle = color_sensor
-            .get_color()
-            .context("Couldn't read color sensor")?;
-
-        *cached_sensor = Some(color_sensor);
-
-        Ok(angle as f32)
-    }
-
-    fn cal_white(&self) -> Result<()> {
-        *self.white.borrow_mut() = self.reflected_light()?;
 
         Ok(())
     }
 
-    fn cal_black(&self) -> Result<()> {
-        *self.black.borrow_mut() = self.reflected_light()?;
+    fn motor_reset(&mut self, stop_action: Option<StopAction>) -> Result<()> {
+        self.motor.reset().context("Reset motor")?;
+
+        self.queued_command = None;
+        self.stopping_action = None;
+        self.speed_sp = None;
+        self.time_sp = None;
+        self.position_sp = None;
+
+        if let Some(stop_action) = stop_action {
+            self.motor
+                .set_stop_action(stop_action.to_str())
+                .context("Set stop action")?;
+
+            self.stopping_action = Some(stop_action);
+        }
 
         Ok(())
     }
 
-    fn follow_line(&self, _distance: i32, _speed: i32) -> Result<()> {
-        unimplemented!()
+    fn wait(&self, timeout: Option<Duration>) -> Result<()> {
+        self.motor.wait_until_not_moving(timeout);
+
+        Ok(())
+    }
+
+    fn speed(&self) -> Result<Speed> {
+        self.motor
+            .get_speed()
+            .map(|it| DegreesPerSecond(it as f32).into())
+            .context("Read motor speed")
+    }
+
+    fn motor_angle(&self) -> Result<Distance> {
+        self.motor
+            .get_position()
+            .map(|it| Degrees(it as f32).into())
+            .context("Read motor position")
     }
 }
 
-impl<G: GyroSensorType> ColorSensor for LegoRobot<G, HasColorSensor> {
-    fn reflected_light(&self) -> Result<f32> {
-        self.color_sensor.reflected_light()
+impl ColorSensor for LegoColorSensor {
+    fn reflected_light(&self) -> Result<Percent> {
+        let reflected = self.color.get_color().context("Read color sensor")?;
+        let percent = reflected as f32 / 100.0;
+        let adjusted = (percent - self.black) / (self.white - self.black);
+
+        Ok(Percent(adjusted))
     }
 
-    fn cal_white(&self) -> Result<()> {
-        self.color_sensor.cal_white()
+    fn cal_white(&mut self) -> Result<()> {
+        let reflected = self.color.get_color().context("Read color sensor")?;
+        self.white = reflected as f32 / 100.0;
+
+        Ok(())
     }
 
-    fn cal_black(&self) -> Result<()> {
-        self.color_sensor.cal_black()
+    fn cal_black(&mut self) -> Result<()> {
+        let reflected = self.color.get_color().context("Read color sensor")?;
+        self.black = reflected as f32 / 100.0;
+
+        Ok(())
     }
 
-    fn follow_line(&self, distance: i32, speed: i32) -> Result<()> {
-        todo!()
+    fn reset(&mut self) -> Result<()> {
+        self.white = 1.0;
+        self.black = 0.0;
+
+        Ok(())
     }
 }
 
-impl<G: GyroSensorType> DualColorSensor for LegoRobot<G, HasDualColorSensor> {
-    type Sensor = HasColorSensor;
+fn init_color_sensor(color: Ev3ColorSensor) -> Result<LegoColorSensor> {
+    color
+        .set_mode_col_reflect()
+        .context("Set color sensor mode")?;
 
-    fn color_right(&self) -> &Self::Sensor {
-        &self.color_sensor.right
-    }
+    Ok(LegoColorSensor {
+        color,
+        white: 1.0,
+        black: 0.0,
+    })
+}
 
-    fn color_left(&self) -> &Self::Sensor {
-        &self.color_sensor.left
-    }
+fn init_gyro_sensor(gyro: Ev3GyroSensor) -> Result<LegoGyroSensor> {
+    gyro.set_mode_gyro_ang().context("Set gyro sensor mode")?;
 
-    fn align(&self, max_distance: i32, speed: i32) -> Result<()> {
-        todo!()
-    }
+    let mut gyro = LegoGyroSensor { gyro };
+    reset_gyro(&mut gyro).context("Reset gyro")?;
 
-    fn follow_line_left(&self, distance: i32, speed: i32) -> Result<()> {
-        todo!()
-    }
+    Ok(gyro)
+}
 
-    fn follow_line_right(&self, distance: i32, speed: i32) -> Result<()> {
-        todo!()
-    }
+fn reset_gyro(gyro: &mut LegoGyroSensor) -> Result<()> {
+    todo!("Proper reset it");
 }

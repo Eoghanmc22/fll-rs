@@ -11,3 +11,5 @@ imageproc = { version = "0.23", default-features = false }
 rusttype = "0.9"
 
 ev3dev-lang-rust = { version = "0.12", features = ["screen"] }
+
+fxhash = "0.2.1"

@@ -1,3 +1,5 @@
+use anyhow::Context;
+
 use crate::error::Result;
 use crate::math;
 use crate::movement::acceleration::TrapezoidalAcceleration;
@@ -69,8 +71,8 @@ impl MovementController {
         let mut pid = PidController::new(self.pid_config);
 
         // Setup motors
-        let right = robot.motor(MotorId::DriveRight);
-        let left = robot.motor(MotorId::DriveLeft);
+        let mut right = robot.motor(MotorId::DriveRight).context("Right motor")?;
+        let mut left = robot.motor(MotorId::DriveLeft).context("Lext motor")?;
 
         right.motor_reset(Some(StopAction::Hold))?;
         left.motor_reset(Some(StopAction::Hold))?;
@@ -78,7 +80,7 @@ impl MovementController {
         // Record the start time for acceleration
         let start = Instant::now();
 
-        while position(&spec, &[right, left])?.0 < distance {
+        while position(&spec, &[&*right, &*left])?.0 < distance {
             // Update the PID controller
             let error = math::subtract_angles(self.target_direction, robot.angle()?).0;
             let correction = pid.update(error) * sign;
@@ -125,8 +127,8 @@ impl MovementController {
         right.raw(Command::Stop(StopAction::Hold))?;
         left.raw(Command::Stop(StopAction::Hold))?;
 
-        right.wait()?;
-        left.wait()?;
+        right.wait(None)?;
+        left.wait(None)?;
 
         Ok(())
     }
@@ -186,8 +188,8 @@ impl MovementController {
         );
 
         // Setup motors
-        let right = robot.motor(MotorId::DriveRight);
-        let left = robot.motor(MotorId::DriveLeft);
+        let mut right = robot.motor(MotorId::DriveRight).context("Right motor")?;
+        let mut left = robot.motor(MotorId::DriveLeft).context("Left motor")?;
 
         right.motor_reset(Some(StopAction::Hold))?;
         left.motor_reset(Some(StopAction::Hold))?;
@@ -195,7 +197,7 @@ impl MovementController {
         // Record the start time for acceleration
         let start = Instant::now();
 
-        while position(&spec, &[right, left])?.0 < distance {
+        while position(&spec, &[&*right, &*left])?.0 < distance {
             // Get position on acceleration curve
             let speed = acceleration.get_speed(start.elapsed()).0;
 
@@ -220,8 +222,8 @@ impl MovementController {
         right.raw(Command::Stop(StopAction::Hold))?;
         left.raw(Command::Stop(StopAction::Hold))?;
 
-        right.wait()?;
-        left.wait()?;
+        right.wait(None)?;
+        left.wait(None)?;
 
         Ok(())
     }
