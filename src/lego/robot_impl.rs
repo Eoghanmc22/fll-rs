@@ -82,20 +82,19 @@ impl LegoRobot {
     ) -> Result<Self> {
         let battery = PowerSupply::new().context("Couldn't find power supply")?;
 
-        let buttons = Ev3Button::new().context("Couldn't find buttons")?;
-        let input = Default::default();
-        let buttons_raw = File::open("/dev/input/by-path/platform-gpio_keys-event")?;
-
         let controller = MovementController::new(pid_config);
 
         let spec = Rc::new(spec);
 
-        // Discover motors
+        // Setup input
+        let buttons = Ev3Button::new().context("Couldn't find buttons")?;
+        let input = Default::default();
+        let buttons_raw = File::open("/dev/input/by-path/platform-gpio_keys-event")?;
+
+        // Discover sensors and motors
         let motor_definitions: Vec<_> = motor_definitions.into();
         let motors =
             discover_motors(&motor_definitions, spec.clone()).context("Discover motors")?;
-
-        // Discover sensors
         let sensors = discover_sensors().context("Discover sensors")?;
 
         Ok(Self {
