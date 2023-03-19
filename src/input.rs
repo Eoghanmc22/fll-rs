@@ -17,9 +17,14 @@ impl Input {
     pub const BACKSPACE: usize = 5;
 
     /// Update with new data
-    pub fn update(&mut self, new_state: [bool; 6]) {
+    pub fn update(&mut self, new_state: [bool; 6]) -> bool {
         let last_input = mem::replace(&mut self.current_input, new_state);
-        self.last_input = last_input;
+        if new_state != last_input {
+            self.last_input = last_input;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn is_up(&self) -> bool {

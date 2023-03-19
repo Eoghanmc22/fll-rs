@@ -3,21 +3,21 @@ use crate::graphics::display::{Display, Renderer};
 use crate::input::Input;
 
 /// Simple ui to select an item from a list
-pub struct Menu {
+pub struct Menu<'a> {
     top: usize,
     selected: usize,
     rows: usize,
 
-    items: Vec<MenuItem>,
+    items: Vec<MenuItem<'a>>,
 }
 
 /// Repersents an item displayed in a `Menu`
-struct MenuItem {
+struct MenuItem<'a> {
     name: String,
-    callback: Box<dyn FnMut()>,
+    callback: &'a dyn Fn(),
 }
 
-impl Menu {
+impl<'a> Menu<'a> {
     /// Creats a menu that displays `rows` rows at a time
     pub fn new(rows: usize) -> Self {
         Self {
@@ -30,10 +30,10 @@ impl Menu {
     }
 
     /// Adds a new `MenuItem` to the bottom of the `Menu`
-    pub fn push<F: FnMut() + 'static>(&mut self, name: &str, code: F) {
+    pub fn push<F: Fn() + 'a>(&mut self, name: &str, code: &'a F) {
         self.items.push(MenuItem {
             name: name.to_owned(),
-            callback: Box::new(code),
+            callback: code,
         });
     }
 
@@ -52,11 +52,11 @@ impl Menu {
     }
 }
 
-impl Menu {
+impl Menu<'_> {
     /// Renders the `Menu` to the provided `renderer`
     pub fn render<D: Display>(&self, renderer: &mut Renderer<D>) {
         let start = self.top;
-        let end = usize::max(start + self.rows, self.items.len());
+        let end = usize::min(start + self.rows, self.items.len());
 
         let row_height = renderer.height() / self.rows as u32;
 

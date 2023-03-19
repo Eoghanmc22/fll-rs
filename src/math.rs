@@ -21,5 +21,19 @@ pub fn normalize_angle(Heading(angle): Heading) -> Heading {
 /// Caculates the distance in degrees between to angles
 pub fn subtract_angles(Heading(a): Heading, Heading(b): Heading) -> Heading {
     // TODO check correctness
-    normalize_angle((modf(a, 360.0) - modf(b, 360.0)).angle())
+    normalize_angle((modf(a, 360.0) - modf(b, 360.0)).ang())
+}
+
+pub fn add_angles(Heading(a): Heading, Heading(b): Heading) -> Heading {
+    // TODO check correctness
+    normalize_angle((modf(a, 360.0) + modf(b, 360.0)).ang())
+}
+
+pub fn lerp_angles(alpha: f32, a: Heading, b: Heading) -> Heading {
+    let alpha = alpha.min(1.0).max(0.0);
+
+    // TODO check correctness
+    let delta = subtract_angles(b, a).0;
+    let offset = delta * alpha;
+    add_angles(a, Heading(offset))
 }

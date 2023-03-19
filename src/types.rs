@@ -1,8 +1,22 @@
 //! Newtype definitions for units
 
+use std::ops::Neg;
+
 use crate::movement::spec::RobotSpec;
 
 // TODO check i did this right
+
+macro_rules! impl_math {
+    ($type:ty) => {
+        impl Neg for $type {
+            type Output = $type;
+
+            fn neg(self) -> Self::Output {
+                Self(-self.0)
+            }
+        }
+    };
+}
 
 /// Repersents distance in milimeters
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -39,6 +53,16 @@ pub struct Percent(pub f32);
 /// Repersent a heading, stored as degrees (-180 -> 180 when normalized)
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Heading(pub f32);
+
+impl_math!(Milimeters);
+impl_math!(Degrees);
+impl_math!(Rotations);
+impl_math!(DegreesPerSecond);
+impl_math!(MilimetersPerSecond);
+impl_math!(DegreesPerSecondPerSecond);
+impl_math!(MilimetersPerSecondPerSecond);
+impl_math!(Percent);
+impl_math!(Heading);
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum Distance {
@@ -203,7 +227,7 @@ pub trait UnitsExt {
     fn mmps2(self) -> MilimetersPerSecondPerSecond;
 
     /// Converts this value to `Heading` (heading)
-    fn angle(self) -> Heading;
+    fn ang(self) -> Heading;
 
     /// Converts number from -100 -> 100 to percent
     fn pct(self) -> Percent;
@@ -238,7 +262,7 @@ impl UnitsExt for f32 {
         MilimetersPerSecondPerSecond(self)
     }
 
-    fn angle(self) -> Heading {
+    fn ang(self) -> Heading {
         Heading(self)
     }
 
@@ -276,7 +300,7 @@ impl UnitsExt for i32 {
         MilimetersPerSecondPerSecond(self as f32)
     }
 
-    fn angle(self) -> Heading {
+    fn ang(self) -> Heading {
         Heading(self as f32)
     }
 

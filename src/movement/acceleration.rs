@@ -31,7 +31,7 @@ pub enum AccelerationPhase {
 /// Slowest speed the robot will go in degrees per second
 pub const MIN_SPEED: f32 = 100.0;
 /// The amount time to spend in the "Stopping"
-pub const STOPPING_DURATION: f32 = 0.25;
+pub const STOPPING_DURATION: f32 = 0.5;
 /// Length of "Stoping" phase
 pub const STOPPING_LENGTH: f32 = STOPPING_DURATION * MIN_SPEED;
 
@@ -43,13 +43,11 @@ impl TrapezoidalAcceleration {
         DegreesPerSecondPerSecond(acceleration): DegreesPerSecondPerSecond,
         DegreesPerSecondPerSecond(deceleration): DegreesPerSecondPerSecond,
     ) -> Self {
-        assert!(
-            total_distance >= 0.0,
-            "total_distance must be greater than 0"
-        );
         assert!(target_speed >= 0.0, "target_speed must be greater than 0");
         assert!(acceleration >= 0.0, "acceleration must be greater than 0");
         assert!(deceleration >= 0.0, "deceleration must be greater than 0");
+
+        let total_distance = total_distance.abs();
 
         let target_speed = {
             // Calculate the speed needed to solve the curve if the curve is unsolvable with the provided target_speed
@@ -130,10 +128,7 @@ impl TrapezoidalAcceleration {
             return (MIN_SPEED, AccelerationPhase::Stopping);
         }
 
-        if sec < 0.0 {
-            // Backup definition for illegal inputs
-            (MIN_SPEED, AccelerationPhase::Illegal)
-        } else if sec < self.acceleration_end {
+        if sec < self.acceleration_end {
             // Acceleration
             (
                 self.acceleration * sec + MIN_SPEED,
@@ -155,6 +150,41 @@ impl TrapezoidalAcceleration {
             // Backup definition for illegal inputs
             (MIN_SPEED, AccelerationPhase::Illegal)
         }
+    }
+
+    /// Gets the distance the robot should have moved by a given time
+    pub fn get_distance(&self, time: Duration) -> f32 {
+        let sec = time.as_secs_f32();
+
+        if self.target_speed <= MIN_SPEED {
+            return MIN_SPEED * sec;
+        }
+
+        let mut total = 0.0;
+
+        {
+            // Acceleration
+            let in_phase = sec.min(self.acceleration_end).max(0.0);
+            total += self.acceleration * in_phase * in_phase / 2.0 + MIN_SPEED * in_phase;
+        }
+        {
+            // Constant
+            (self.target_speed, AccelerationPhase::Constant);
+            let in_phase = (sec.min(self.const_end) - self.acceleration_end).max(0.0);
+            total += self.target_speed * in_phase;
+        }
+        {
+            // Deceleration
+            let in_phase = (sec.min(self.deceleration_end) - self.const_end).max(0.0);
+            total += self.target_speed * in_phase - self.deceleration * in_phase * in_phase / 2.0;
+        }
+        {
+            // Stopping & illegal
+            let in_phase = (sec.min(self.total_duration) - self.deceleration_end).max(0.0);
+            total += MIN_SPEED * in_phase;
+        }
+
+        return total;
     }
 
     // The distance this acceleration curve covers

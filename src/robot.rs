@@ -178,6 +178,9 @@ pub trait Robot: AngleProvider {
     /// Waits for the status of the robot's buttons and returns that new status
     fn await_input(&self) -> Result<Input>;
 
+    /// Stops the robot's motors
+    fn stop(&self) -> Result<()>;
+
     /// Resets the robot's state
     fn reset(&self) -> Result<()>;
 
@@ -230,17 +233,43 @@ pub trait MotorExt {
     fn time(&mut self, duration: Duration, speed: impl Into<Speed>) -> Result<()>;
 }
 
-impl<M: Motor> MotorExt for M {
+impl MotorExt for dyn Motor + '_ {
     fn dist(&mut self, dist: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
-        self.raw(Command::Distance(dist.into(), speed.into()))
+        self.raw(Command::Distance(dist.into(), speed.into()))?;
+
+        self.wait(None)
     }
 
     fn to_pos(&mut self, position: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
-        self.raw(Command::To(position.into(), speed.into()))
+        self.raw(Command::To(position.into(), speed.into()))?;
+
+        self.wait(None)
     }
 
     fn time(&mut self, duration: Duration, speed: impl Into<Speed>) -> Result<()> {
-        self.raw(Command::Time(duration, speed.into()))
+        self.raw(Command::Time(duration, speed.into()))?;
+
+        self.wait(None)
+    }
+}
+
+impl<M: Motor> MotorExt for M {
+    fn dist(&mut self, dist: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
+        self.raw(Command::Distance(dist.into(), speed.into()))?;
+
+        self.wait(None)
+    }
+
+    fn to_pos(&mut self, position: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
+        self.raw(Command::To(position.into(), speed.into()))?;
+
+        self.wait(None)
+    }
+
+    fn time(&mut self, duration: Duration, speed: impl Into<Speed>) -> Result<()> {
+        self.raw(Command::Time(duration, speed.into()))?;
+
+        self.wait(None)
     }
 }
 

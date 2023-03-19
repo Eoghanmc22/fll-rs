@@ -28,11 +28,10 @@ impl PidController {
         }
     }
 
-    // TODO could this be improved with knowledge of the duration of the time step?
     pub fn update(&mut self, error: f32) -> f32 {
-        self.integral += error;
-
         let cfg = &self.pid;
+
+        self.integral += error;
 
         let proportional = error;
         let integral = self.integral;

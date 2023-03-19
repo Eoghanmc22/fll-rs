@@ -11,6 +11,7 @@ use anyhow::{bail, Context};
 use ev3dev_lang_rust::motors::{MotorPort, TachoMotor as Ev3TachoMotor};
 use ev3dev_lang_rust::sensors::ColorSensor as Ev3ColorSensor;
 use ev3dev_lang_rust::sensors::GyroSensor as Ev3GyroSensor;
+use ev3dev_lang_rust::sensors::Sensor;
 use ev3dev_lang_rust::sensors::SensorPort;
 use ev3dev_lang_rust::{wait, Ev3Button, Port, PowerSupply};
 use ev3dev_lang_rust::{Attribute, Device};
@@ -29,7 +30,8 @@ pub struct LegoRobot {
     buttons_raw: File,
     input: RefCell<Input>,
 
-    controller: MovementController,
+    pid_config: PidConfig,
+    controller: RefCell<MovementController>,
     angle_algorithm: AngleAlgorithm,
 
     motors: HashMap<MotorId, RefCell<LegoMotor>>,
@@ -80,9 +82,12 @@ impl LegoRobot {
         spec: RobotSpec,
         angle_algorithm: AngleAlgorithm,
     ) -> Result<Self> {
+        // Wait for any drivers to start up
+        thread::sleep(Duration::from_millis(300));
+
         let battery = PowerSupply::new().context("Couldn't find power supply")?;
 
-        let controller = MovementController::new(pid_config);
+        let controller = MovementController::new(pid_config).into();
 
         let spec = Rc::new(spec);
 
@@ -108,6 +113,7 @@ impl LegoRobot {
             angle_algorithm,
             sensors,
             motor_definitions,
+            pid_config,
         })
     }
 
@@ -123,11 +129,26 @@ impl LegoRobot {
 
         Ok(())
     }
+
+    fn update_button_state(&self) -> bool {
+        self.buttons.process();
+
+        let mut state = [false; 6];
+
+        state[Input::UP] = self.buttons.is_up();
+        state[Input::DOWN] = self.buttons.is_down();
+        state[Input::LEFT] = self.buttons.is_left();
+        state[Input::RIGHT] = self.buttons.is_right();
+        state[Input::ENTER] = self.buttons.is_enter();
+        state[Input::BACKSPACE] = self.buttons.is_backspace();
+
+        self.input.borrow_mut().update(state)
+    }
 }
 
 impl Robot for LegoRobot {
     fn drive(&self, distance: impl Into<Distance>, speed: impl Into<Speed>) -> Result<()> {
-        self.controller.drive(
+        self.controller.borrow_mut().drive(
             self,
             distance.into().to_deg(&self.spec),
             speed.into().to_dps(&self.spec),
@@ -136,11 +157,13 @@ impl Robot for LegoRobot {
 
     fn turn(&self, angle: Heading, speed: impl Into<Speed>) -> Result<()> {
         self.controller
+            .borrow_mut()
             .turn(self, angle, speed.into().to_dps(&self.spec))
     }
 
     fn turn_named(&self, angle: Heading, speed: impl Into<Speed>, turn: TurnType) -> Result<()> {
         self.controller
+            .borrow_mut()
             .turn_named(self, angle, speed.into().to_dps(&self.spec), turn)
     }
 
@@ -165,40 +188,47 @@ impl Robot for LegoRobot {
     }
 
     fn process_buttons(&self) -> Result<Input> {
-        self.buttons.process();
-
-        let mut state = [false; 6];
-
-        state[Input::UP] = self.buttons.is_up();
-        state[Input::DOWN] = self.buttons.is_down();
-        state[Input::LEFT] = self.buttons.is_left();
-        state[Input::RIGHT] = self.buttons.is_right();
-        state[Input::ENTER] = self.buttons.is_enter();
-        state[Input::BACKSPACE] = self.buttons.is_backspace();
-
-        self.input.borrow_mut().update(state);
+        self.update_button_state();
 
         Ok(self.input.borrow().clone())
     }
 
     fn battery(&self) -> Result<Percent> {
-        let min = self
-            .battery
-            .get_voltage_min_design()
-            .context("Get min voltage")? as f32;
+        // let min = self
+        //     .battery
+        //     .get_voltage_min_design()
+        //     .context("Get min voltage")? as f32;
+
         let max = self
             .battery
             .get_voltage_max_design()
             .context("Get max voltage")? as f32;
         let current = self.battery.get_voltage_now().context("Get voltage")? as f32;
 
-        Ok(Percent((current - min) / (max - min)))
+        // Ok(Percent((dbg!(current) - dbg!(min)) / (dbg!(max) - min)))
+
+        // Seems to be a bug in ev3dev
+        Ok(Percent((current * 10.0 / max).min(1.0).max(0.0)))
     }
 
     fn await_input(&self) -> Result<Input> {
-        wait::wait(self.buttons_raw.as_raw_fd(), || true, None);
+        wait::wait(
+            self.buttons_raw.as_raw_fd(),
+            || self.update_button_state(),
+            None,
+        );
 
-        self.process_buttons()
+        Ok(self.input.borrow().clone())
+    }
+
+    fn stop(&self) -> Result<()> {
+        for motor in self.motors.values() {
+            motor
+                .borrow_mut()
+                .motor_reset(None)
+                .context("Reset motor")?;
+        }
+        Ok(())
     }
 
     fn reset(&self) -> Result<()> {
@@ -217,6 +247,7 @@ impl Robot for LegoRobot {
             }
         }
         *self.input.borrow_mut() = Default::default();
+        *self.controller.borrow_mut() = MovementController::new(self.pid_config);
 
         Ok(())
     }
@@ -245,7 +276,7 @@ impl AngleProvider for LegoRobot {
                 let sensor = self.sensors.get(&port.address()).context("No gyro found")?;
 
                 if let LegoSensor::Gyro(gyro) = sensor {
-                    Ok(Heading(gyro.borrow().gyro.get_angle()? as f32))
+                    Ok(Heading(gyro.borrow().gyro.get_value0()? as f32))
                 } else {
                     bail!("Sensor in {port:?} is not a gyro sensor");
                 }
@@ -395,6 +426,8 @@ impl Motor for LegoMotor {
             self.stopping_action = Some(stop_action);
         }
 
+        self.motor.stop().context("Stop motor")?;
+
         Ok(())
     }
 
@@ -481,7 +514,11 @@ fn discover_sensors() -> Result<HashMap<String, LegoSensor>> {
     let mut sensors = HashMap::default();
 
     for color_sensor in Ev3ColorSensor::list().context("Find color sensors")? {
-        let address = color_sensor.get_address()?;
+        let address = color_sensor
+            .get_address()?
+            .strip_prefix("ev3-ports:")
+            .context("Strip prefix")?
+            .to_owned();
         sensors.insert(
             address,
             LegoSensor::Color(
@@ -492,7 +529,11 @@ fn discover_sensors() -> Result<HashMap<String, LegoSensor>> {
         );
     }
     for gyro_sensor in Ev3GyroSensor::list().context("Find gyro sensors")? {
-        let address = gyro_sensor.get_address()?;
+        let address = gyro_sensor
+            .get_address()?
+            .strip_prefix("ev3-ports:")
+            .context("Strip prefix")?
+            .to_owned();
         sensors.insert(
             address,
             LegoSensor::Gyro(
@@ -545,7 +586,7 @@ fn reset_gyro_hard(gyro: &mut LegoGyroSensor) -> Result<()> {
     thread::sleep(Duration::from_millis(300));
     mode.set_str_slice("auto").context("Hard reset gyro")?;
 
-    for _ in 0..10 {
+    for _ in 0..100 {
         let gyros = Ev3GyroSensor::list().context("Find gyro sensors")?;
         for new_gyro in gyros {
             if new_gyro
@@ -554,20 +595,28 @@ fn reset_gyro_hard(gyro: &mut LegoGyroSensor) -> Result<()> {
                 .contains(&address)
             {
                 gyro.gyro = new_gyro;
+
+                // Wait for driver to initalize
+                thread::sleep(Duration::from_millis(300));
+
+                return Ok(());
             }
         }
 
-        thread::sleep(Duration::from_millis(50));
+        // Busy wait the gyro to come back online
+        thread::sleep(Duration::from_millis(100));
     }
 
-    bail!("Gyro did not reconnect within 500ms")
+    bail!("Gyro did not reconnect within 10s");
 }
 
 fn reset_gyro_soft(gyro: &mut LegoGyroSensor) -> Result<()> {
-    gyro.gyro.set_mode_gyro_rate().context("Soft reset gyro")?;
     gyro.gyro
-        .set_mode_gyro_ang()
-        .context("Set gyro sensor mode")?;
+        .get_attribute("direct")
+        .set_str_slice("\x11")
+        .context("Write reset command")?;
+
+    thread::sleep(Duration::from_millis(25));
 
     Ok(())
 }

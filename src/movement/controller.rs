@@ -1,28 +1,13 @@
-use anyhow::Context;
+use anyhow::{bail, Context};
 
 use crate::error::Result;
 use crate::math;
 use crate::movement::acceleration::TrapezoidalAcceleration;
 use crate::movement::pid::{PidConfig, PidController};
-use crate::movement::spec::RobotSpec;
-use crate::robot::{AngleProvider, Command, Motor, MotorId, Robot, StopAction, TurnType};
+use crate::robot::{AngleProvider, Command, MotorId, Robot, StopAction, TurnType};
 use crate::types::{Degrees, DegreesPerSecond, Heading, UnitsExt};
 use std::thread;
 use std::time::{Duration, Instant};
-
-// TODO only have a single method that interfaces with the motors thats versatile enough to
-// implement everything else. ie has end condition, control loop, gyro/color as input
-
-// Turns, drives and arcs are all really the same thing
-// They all have a starting and ending angle (for a drive these 2 are equal)
-// Each of these could be given a coeffecent where dual turn right is 2.0,
-// turn in place right is 1.0, drive is 0.0, and arcs are between 0.0 and 1.0.
-// The power to each wheel would be calculated with:
-// left  = 2 -> -1, 1 -> 0, 0 -> 1, -1 -> 1, -2 ->  1
-// right = 2 ->  1, 1 -> 1, 0 -> 1, -1 -> 0, -2 -> -1
-// x = min(max(x, -2), 2)
-// left  = min(1 - x, 1)
-// right = min(1 + x, 1)
 
 /// The standard implementation of movement
 pub struct MovementController {
@@ -40,111 +25,33 @@ impl MovementController {
 
     /// Implementation of the gyro drive algorithm
     pub fn drive<R: Robot + AngleProvider>(
-        &self,
+        &mut self,
         robot: &R,
-        Degrees(distance): Degrees,
-        DegreesPerSecond(speed): DegreesPerSecond,
+        distance: Degrees,
+        speed: DegreesPerSecond,
     ) -> Result<()> {
-        let spec = robot.spec();
-        let current_max_speed = spec.max_speed().0 * robot.battery()?.0 - 100.0;
-
-        let sign = (distance.signum() * speed.signum()) as f32 * spec.gear_ratio().signum();
-        let distance = distance.abs() as f32;
-        let speed = f32::clamp(speed.abs() as f32, -current_max_speed, current_max_speed);
-
-        if !sign.is_normal() {
-            eprintln!("Skipped drive with bad imputs!");
-            return Ok(());
-        }
-
-        // Would take infinite or zero time to complete
-        assert_ne!(sign, 0.0, "Illegal parameters!");
-
-        // Generate the acceleration curve
-        let acceleration = TrapezoidalAcceleration::new(
-            distance.deg(),
-            speed.dps(),
-            spec.acceleration(),
-            spec.deceleration(),
-        );
-        // Setup the PID controller
-        let mut pid = PidController::new(self.pid_config);
-
-        // Setup motors
-        let mut right = robot.motor(MotorId::DriveRight).context("Right motor")?;
-        let mut left = robot.motor(MotorId::DriveLeft).context("Lext motor")?;
-
-        right.motor_reset(Some(StopAction::Hold))?;
-        left.motor_reset(Some(StopAction::Hold))?;
-
-        // Record the start time for acceleration
-        let start = Instant::now();
-
-        while position(&spec, &[&*right, &*left])?.0 < distance {
-            // Update the PID controller
-            let error = math::subtract_angles(self.target_direction, robot.angle()?).0;
-            let correction = pid.update(error) * sign;
-
-            // Get position on acceleration curve
-            let speed = acceleration.get_speed(start.elapsed()).0;
-
-            // Use correction from the PID controller to create per wheel speed
-            let (speed_left, speed_right) = {
-                let speed_right = speed - speed * correction / 50.0;
-                let speed_right = f32::clamp(speed_right, -current_max_speed, current_max_speed);
-
-                let speed_left = speed + speed * correction / 50.0;
-                let speed_left = f32::clamp(speed_left, -current_max_speed, current_max_speed);
-
-                (speed_left, speed_right)
-            };
-
-            right.raw(Command::Queue(
-                Command::To(
-                    (distance * spec.error_wheel_right() * sign).deg().into(),
-                    speed_right.dps().into(),
-                )
-                .into(),
-            ))?;
-            left.raw(Command::Queue(
-                Command::To(
-                    (distance * spec.error_wheel_left() * sign).deg().into(),
-                    speed_left.dps().into(),
-                )
-                .into(),
-            ))?;
-
-            right.raw(Command::Execute)?;
-            left.raw(Command::Execute)?;
-
-            robot.handle_interrupt()?;
-
-            // TODO tune
-            // Maybe change to yield with temporal adjustments for pid and stuff
-            thread::sleep(Duration::from_millis(10))
-        }
-
-        right.raw(Command::Stop(StopAction::Hold))?;
-        left.raw(Command::Stop(StopAction::Hold))?;
-
-        right.wait(None)?;
-        left.wait(None)?;
-
-        Ok(())
+        self.arc(
+            robot,
+            distance,
+            speed,
+            (1.0, 1.0),
+            EndingCondition::Distance,
+        )
     }
 
     pub fn turn<R: Robot + AngleProvider>(
-        &self,
+        &mut self,
         robot: &R,
         angle: Heading,
         speed: DegreesPerSecond,
     ) -> Result<()> {
+        // Use target angle so behaivor is deterministic
         let difference = math::subtract_angles(angle, self.target_direction);
 
-        let turn_type = if difference.0 < 0.0 {
-            TurnType::Right
-        } else {
+        let turn_type = if difference.0 > 0.0 {
             TurnType::Left
+        } else {
+            TurnType::Right
         };
 
         self.turn_named(robot, angle, speed, turn_type)
@@ -153,31 +60,63 @@ impl MovementController {
     // Has a lot in common with drive, could they be merged?
     // todo implement pid turns??
     pub fn turn_named<R: Robot + AngleProvider>(
-        &self,
+        &mut self,
         robot: &R,
         angle: Heading,
-        DegreesPerSecond(speed): DegreesPerSecond,
+        speed: DegreesPerSecond,
         turn: TurnType,
     ) -> Result<()> {
+        let observered_heading = robot.angle().context("Read heading")?;
+        let angle_delta = math::subtract_angles(angle, observered_heading);
+        let distance = robot.spec().get_distance_for_turn(angle_delta);
+
+        let ratio = match turn {
+            TurnType::Left => (-1.0, 0.0),
+            TurnType::Right => (0.0, 1.0),
+            TurnType::Center => (-1.0, 1.0),
+        };
+
+        self.arc(robot, distance, speed, ratio, EndingCondition::Heading)
+    }
+
+    pub fn arc<R: Robot + AngleProvider>(
+        &mut self,
+        robot: &R,
+        distance: Degrees,
+        speed: DegreesPerSecond,
+        ratio: (f32, f32),
+        ending_condition: EndingCondition,
+    ) -> Result<()> {
+        let distance = distance.0;
+        let speed = speed.0;
+
         assert!(speed > 0.0, "Speed must be greater than 0");
 
         let spec = robot.spec();
-        let current_max_speed = spec.max_speed().0 * robot.battery()?.0 - 100.0;
 
-        // Calculate how much the wheels need to move for this turn
-        // Abs angle -> Rel angle -> distance -> left and right degrees
-        let difference = math::subtract_angles(angle, robot.angle()?);
-        let distance = spec.get_distance_for_turn(difference).0;
-        let (dist_left, dist_right) = turn_split(&turn, distance, spec);
-
-        // No turn is necessary
-        if difference.0.abs() < 3.0 {
+        // Determine the requested direction
+        let direction = distance.signum();
+        if direction == 0.0 {
+            // Requested movement of 0 deg
             return Ok(());
         }
 
-        let sign = distance.signum() * spec.gear_ratio().signum();
-        let distance = distance.abs();
-        let speed = f32::clamp(speed as f32, -current_max_speed, current_max_speed);
+        // Clamp requested speed
+        let current_max_speed = spec.max_speed().0 * robot.battery()?.0 - 100.0;
+        let speed = f32::clamp(speed, 0.0, current_max_speed);
+
+        // Calculate ratios
+        let ratio_left = ratio.0 / (ratio.0.abs() + ratio.1.abs()) * direction;
+        let ratio_right = ratio.1 / (ratio.0.abs() + ratio.1.abs()) * direction;
+
+        // Calculate angles
+        let start_angle = self.target_direction;
+        let delta_angle = spec.get_approx_angle(
+            (distance * ratio_left).deg(),
+            (distance * ratio_right).deg(),
+        );
+        let end_angle = math::add_angles(start_angle, delta_angle);
+        eprintln!("ANGLES: {start_angle:.3?}, {delta_angle:.3?}, {end_angle:.3?}");
 
         // Generate the acceleration curve
         let acceleration = TrapezoidalAcceleration::new(
@@ -187,73 +126,117 @@ impl MovementController {
             spec.deceleration(),
         );
 
-        // Setup motors
-        let mut right = robot.motor(MotorId::DriveRight).context("Right motor")?;
-        let mut left = robot.motor(MotorId::DriveLeft).context("Left motor")?;
+        // Setup the PID controller
+        let mut pid = PidController::new(self.pid_config);
 
-        right.motor_reset(Some(StopAction::Hold))?;
+        // Setup motors
+        let mut left = robot.motor(MotorId::DriveLeft).context("Left motor")?;
+        let mut right = robot.motor(MotorId::DriveRight).context("Right motor")?;
+
         left.motor_reset(Some(StopAction::Hold))?;
+        right.motor_reset(Some(StopAction::Hold))?;
 
         // Record the start time for acceleration
         let start = Instant::now();
 
-        while position(&spec, &[&*right, &*left])?.0 < distance {
+        loop {
+            let iter_start = Instant::now();
+            let duration_since_start = iter_start - start;
+
+            let average_distance = {
+                let raw_left = left.motor_angle().context("Read left wheel angle")?;
+                let raw_right = right.motor_angle().context("Read right wheel angle")?;
+
+                // Due to the ratios, the raw data needs to be corrected before it can be
+                // compared with the requested distance
+                let adjusted_left = raw_left.to_deg(spec).0 / ratio_left;
+                let adjusted_right = raw_right.to_deg(spec).0 / ratio_right;
+
+                // Is it possible that ratio_left or ratio_right could be 0
+                // Check that adjusted values are normal before including them
+                let combined = match (
+                    adjusted_left.is_normal() || adjusted_left == 0.0,
+                    adjusted_right.is_normal() || adjusted_right == 0.0,
+                ) {
+                    (true, true) => (adjusted_left.abs() + adjusted_right.abs()) / 2.0,
+                    (true, false) => adjusted_left.abs(),
+                    (false, true) => adjusted_right.abs(),
+                    (false, false) => bail!("Nether wheel has a normal adjusted angle"),
+                };
+
+                combined
+            };
+
+            // Calculate headings
+            let progress =
+                (acceleration.get_distance(duration_since_start) / distance.abs()).min(1.0);
+            let observered_heading = robot.angle().context("Read heading")?;
+            let target_heading = math::lerp_angles(progress, start_angle, end_angle);
+
+            // Determine if loop should break
+            let should_break = match ending_condition {
+                EndingCondition::Heading => {
+                    math::subtract_angles(end_angle, observered_heading).0.abs() <= 2.0
+                }
+                EndingCondition::Distance => average_distance >= distance.abs(),
+            };
+            if should_break {
+                break;
+            }
+
+            // Run PID controller
+            let error = math::subtract_angles(target_heading, observered_heading).0;
+            let correction = pid.update(error) * direction / 100.0;
+            eprintln!("obs: {observered_heading:.3?}, tar: {target_heading:.3?}, start: {start_angle:.3?}, end: {end_angle:.3?}, progress: {progress:.3?}");
+
             // Get position on acceleration curve
-            let speed = acceleration.get_speed(start.elapsed()).0;
+            let speed_base = acceleration.get_speed(duration_since_start).0;
+            eprintln!("err: {error:.3?}, cor: {correction:.3?}, base: {speed_base:.3?}, rl: {ratio_left:.3?}, rr: {ratio_right:.3?}");
 
-            let (speed_left, speed_right) = turn_split(&turn, speed, spec);
+            // Merge corrections with speeds
+            let speed_left = speed_base * ratio_left * (1.0 + correction);
+            let speed_right = speed_base * ratio_right * (1.0 - correction);
 
-            right.raw(Command::Queue(
-                Command::To((dist_right * sign).deg().into(), speed_right.dps().into()).into(),
-            ))?;
-            left.raw(Command::Queue(
-                Command::To((dist_left * sign).deg().into(), speed_left.dps().into()).into(),
-            ))?;
+            // Re-clamp speeds
+            let speed_left = f32::clamp(speed_left, -current_max_speed, current_max_speed);
+            let speed_right = f32::clamp(speed_right, -current_max_speed, current_max_speed);
 
-            right.raw(Command::Execute)?;
-            left.raw(Command::Execute)?;
+            // Send motor commands
+            {
+                left.raw(Command::Queue(Command::On(speed_left.dps().into()).into()))?;
+                right.raw(Command::Queue(Command::On(speed_right.dps().into()).into()))?;
 
+                left.raw(Command::Execute)?;
+                right.raw(Command::Execute)?;
+            }
+
+            // Exit if requested
             robot.handle_interrupt()?;
 
             // TODO tune
-            thread::sleep(Duration::from_millis(10))
+            thread::sleep(
+                Duration::checked_sub(Duration::from_millis(10), iter_start.elapsed())
+                    .unwrap_or_default(),
+            )
         }
 
-        right.raw(Command::Stop(StopAction::Hold))?;
-        left.raw(Command::Stop(StopAction::Hold))?;
+        // Update state
+        self.target_direction = end_angle;
 
-        right.wait(None)?;
+        // Request motor stop
+        left.raw(Command::Stop(StopAction::Hold))?;
+        right.raw(Command::Stop(StopAction::Hold))?;
+
+        // Wait for motors to stop
         left.wait(None)?;
+        right.wait(None)?;
 
         Ok(())
     }
 }
 
-/// Returns the average position of the motors provided
-fn position(spec: &RobotSpec, motors: &[&dyn Motor]) -> Result<Degrees> {
-    debug_assert!(!motors.is_empty());
-
-    let mut sum = 0.0;
-    let mut count = 0.0;
-
-    for motor in motors {
-        let left_pos = motor.motor_angle()?.to_deg(&spec).0.abs();
-
-        sum += left_pos as f32;
-        count += 1.0;
-    }
-
-    Ok((sum / count).deg())
-}
-
-/// Helper to calculate what each wheel should do in a turn
-fn turn_split(turn_type: &TurnType, val: f32, spec: &RobotSpec) -> (f32, f32) {
-    match turn_type {
-        TurnType::Right => (0.0, val * spec.error_wheel_right()),
-        TurnType::Left => (val * spec.error_wheel_left(), 0.0),
-        TurnType::Center => (
-            val * spec.error_wheel_left() / 2.0,
-            val * spec.error_wheel_right() / 2.0,
-        ),
-    }
+#[derive(Clone, Copy, Debug)]
+pub enum EndingCondition {
+    Heading,
+    Distance,
 }
