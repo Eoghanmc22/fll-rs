@@ -71,9 +71,9 @@ impl MovementController {
         let distance = robot.spec().get_distance_for_turn(angle_delta);
 
         let ratio = match turn {
-            TurnType::Left => (-1.0, 0.0),
-            TurnType::Right => (0.0, 1.0),
-            TurnType::Center => (-1.0, 1.0),
+            TurnType::Left => (1.0, 0.0),
+            TurnType::Right => (0.0, -1.0),
+            TurnType::Center => (1.0, -1.0),
         };
 
         self.arc(robot, distance, speed, ratio, EndingCondition::Heading)
@@ -87,27 +87,28 @@ impl MovementController {
         ratio: (f32, f32),
         ending_condition: EndingCondition,
     ) -> Result<()> {
-        let distance = distance.0;
+        // Determine the requested direction
+        let direction = distance.0.signum();
+        if direction == 0.0 {
+            // Requested movement of 0 deg
+            return Ok(());
+        }
+
+        let distance = distance.0.abs();
         let speed = speed.0;
 
         assert!(speed > 0.0, "Speed must be greater than 0");
 
         let spec = robot.spec();
 
-        // Determine the requested direction
-        let direction = distance.signum();
-        if direction == 0.0 {
-            // Requested movement of 0 deg
-            return Ok(());
-        }
-
         // Clamp requested speed
         let current_max_speed = spec.max_speed().0 * robot.battery()?.0 - 100.0;
         let speed = f32::clamp(speed, 0.0, current_max_speed);
 
         // Calculate ratios
-        let ratio_left = ratio.0 / (ratio.0.abs() + ratio.1.abs()) * direction;
-        let ratio_right = ratio.1 / (ratio.0.abs() + ratio.1.abs()) * direction;
+        let base = f32::max(ratio.0.abs(), ratio.1.abs());
+        let ratio_left = ratio.0 / base * direction;
+        let ratio_right = ratio.1 / base * direction;
 
         // Calculate angles
         let start_angle = self.target_direction;
@@ -116,7 +117,6 @@ impl MovementController {
             (distance * ratio_right).deg(),
         );
         let end_angle = math::add_angles(start_angle, delta_angle);
-        eprintln!("ANGLES: {start_angle:.3?}, {delta_angle:.3?}, {end_angle:.3?}");
 
         // Generate the acceleration curve
         let acceleration = TrapezoidalAcceleration::new(
@@ -168,8 +168,7 @@ impl MovementController {
             };
 
             // Calculate headings
-            let progress =
-                (acceleration.get_distance(duration_since_start) / distance.abs()).min(1.0);
+            let progress = (acceleration.get_distance(duration_since_start) / distance).min(1.0);
             let observered_heading = robot.angle().context("Read heading")?;
             let target_heading = math::lerp_angles(progress, start_angle, end_angle);
 
@@ -178,7 +177,7 @@ impl MovementController {
                 EndingCondition::Heading => {
                     math::subtract_angles(end_angle, observered_heading).0.abs() <= 2.0
                 }
-                EndingCondition::Distance => average_distance >= distance.abs(),
+                EndingCondition::Distance => average_distance >= distance,
             };
             if should_break {
                 break;
@@ -186,16 +185,15 @@ impl MovementController {
 
             // Run PID controller
             let error = math::subtract_angles(target_heading, observered_heading).0;
-            let correction = pid.update(error) * direction / 100.0;
-            eprintln!("obs: {observered_heading:.3?}, tar: {target_heading:.3?}, start: {start_angle:.3?}, end: {end_angle:.3?}, progress: {progress:.3?}");
+            let (pid, _) = pid.update(error);
+            let correction = pid / 100.0;
 
             // Get position on acceleration curve
             let speed_base = acceleration.get_speed(duration_since_start).0;
-            eprintln!("err: {error:.3?}, cor: {correction:.3?}, base: {speed_base:.3?}, rl: {ratio_left:.3?}, rr: {ratio_right:.3?}");
 
             // Merge corrections with speeds
-            let speed_left = speed_base * ratio_left * (1.0 + correction);
-            let speed_right = speed_base * ratio_right * (1.0 - correction);
+            let speed_left = (speed_base + correction * current_max_speed) * ratio_left;
+            let speed_right = (speed_base - correction * current_max_speed) * ratio_right;
 
             // Re-clamp speeds
             let speed_left = f32::clamp(speed_left, -current_max_speed, current_max_speed);

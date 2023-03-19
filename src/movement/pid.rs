@@ -28,7 +28,7 @@ impl PidController {
         }
     }
 
-    pub fn update(&mut self, error: f32) -> f32 {
+    pub fn update(&mut self, error: f32) -> (f32, (f32, f32, f32)) {
         let cfg = &self.pid;
 
         self.integral += error;
@@ -39,6 +39,10 @@ impl PidController {
 
         self.last_error = error;
 
-        cfg.kp * proportional + cfg.ki * integral + cfg.kd + derivative
+        let p = cfg.kp * proportional;
+        let i = cfg.ki * integral;
+        let d = cfg.kd * derivative;
+
+        (p + i + d, (p, i, d))
     }
 }
