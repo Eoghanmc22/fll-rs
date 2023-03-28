@@ -1,6 +1,6 @@
 ## Cross Compiling
 
-To cross compile, the rust toolchain for `armv5te-musl` needs to be installed
+To cross compile, the rust tool chain for `armv5te-musl` needs to be installed
 
 ```bash
 rustup target add armv5te-unknown-linux-musleabi
@@ -17,7 +17,7 @@ target = "armv5te-unknown-linux-musleabi"
 linker = "rust-lld"
 ```
 
-See https://crates.io/crates/ev3dev-lang-rust for information about the underlying api used and cross compiling your code
+See https://crates.io/crates/ev3dev-lang-rust for information about cross compiling your code
 
 ## Reducing Binary Size
 
