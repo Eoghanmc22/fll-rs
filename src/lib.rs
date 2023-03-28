@@ -1,5 +1,3 @@
-#![feature(once_cell)]
-
 // TODO enable more linting rules
 
 pub mod error;

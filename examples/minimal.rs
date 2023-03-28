@@ -50,7 +50,7 @@ fn main() -> anyhow::Result<()> {
     let reset_attachments = wrap_mission(&robot, &renderer, missions::reset_attachments);
     main_menu.push("Reset attachments", &reset_attachments);
     let mission_test = wrap_mission(&robot, &renderer, missions::test);
-    main_menu.push("Test", &mission_run_1);
+    main_menu.push("Test", &mission_test);
     let snake_game = || {
         games::snake(&robot, &renderer);
     };
