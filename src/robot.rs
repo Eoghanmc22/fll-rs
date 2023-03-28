@@ -176,7 +176,7 @@ pub trait Robot: AngleProvider {
     fn battery(&self) -> Result<Percent>;
 
     /// Waits for the status of the robot's buttons and returns that new status
-    fn await_input(&self) -> Result<Input>;
+    fn await_input(&self, timeout: Option<Duration>) -> Result<Input>;
 
     /// Stops the robot's motors
     fn stop(&self) -> Result<()>;

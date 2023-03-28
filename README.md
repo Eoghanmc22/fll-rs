@@ -1,12 +1,8 @@
 See https://crates.io/crates/ev3dev-lang-rust for information about the underlying api used and cross compiling your code
 
-you should add options like this to your Cargo.toml
+Including the following in `Cargo.toml` will substantially decrease binary size (and therefore upload times) in release mode
 
 ```toml
 [profile.release]
-lto = true
-codegen-units = 1
-# this line tells the compilet to try to make the binary smaller
-# this might not be necessary as it tends to negativly impacts preformance
-opt-level = "s"
+strip = true
 ```

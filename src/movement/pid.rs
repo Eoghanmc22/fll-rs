@@ -8,6 +8,9 @@ pub struct PidConfig {
 
     /// How strongly to correct for predicted error
     pub kd: f32,
+
+    /// The max allowed value for the integral
+    pub max_i: f32,
 }
 
 /// Implementation of PID algorithm
@@ -32,6 +35,7 @@ impl PidController {
         let cfg = &self.pid;
 
         self.integral += error;
+        self.integral = self.integral.clamp(-cfg.max_i, cfg.max_i);
 
         let proportional = error;
         let integral = self.integral;

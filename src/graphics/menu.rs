@@ -60,6 +60,8 @@ impl Menu<'_> {
 
         let row_height = renderer.height() / self.rows as u32;
 
+        renderer.clear();
+
         for idx in start..end {
             let name = &self.items[idx].name;
 
@@ -97,16 +99,16 @@ impl Menu<'_> {
     /// Return true if the menu should remain open
     pub fn notify_input(&mut self, input: &Input) -> bool {
         // Update cursor
-        if input.pressed_down() {
+        if input.is_down() {
             self.selected += 1;
         }
-        if input.pressed_up() {
-            self.selected -= 1;
+        if input.is_up() {
+            self.selected += self.items.len().max(1) - 1;
         }
 
         self.update_bounds();
 
-        if input.pressed_enter() {
+        if input.is_enter() {
             if let Some(item) = self.items.get_mut(self.selected) {
                 // Enter the selected menu
                 (item.callback)();
@@ -116,6 +118,6 @@ impl Menu<'_> {
         }
 
         // If the user pressed left, we should return to the parent menu
-        !input.pressed_left()
+        !input.is_left()
     }
 }

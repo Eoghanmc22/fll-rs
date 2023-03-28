@@ -87,12 +87,13 @@ impl MovementController {
         ratio: (f32, f32),
         ending_condition: EndingCondition,
     ) -> Result<()> {
-        // Determine the requested direction
-        let direction = distance.0.signum();
-        if direction == 0.0 {
+        if distance.0 == 0.0 {
             // Requested movement of 0 deg
             return Ok(());
         }
+
+        // Determine the requested direction
+        let direction = distance.0.signum();
 
         let distance = distance.0.abs();
         let speed = speed.0;
@@ -109,6 +110,10 @@ impl MovementController {
         let base = f32::max(ratio.0.abs(), ratio.1.abs());
         let ratio_left = ratio.0 / base * direction;
         let ratio_right = ratio.1 / base * direction;
+
+        // Determine which wheels should move at all
+        let move_left = (ratio_left.ceil() as i32).signum().abs() as f32;
+        let move_right = (ratio_right.ceil() as i32).signum().abs() as f32;
 
         // Calculate angles
         let start_angle = self.target_direction;
@@ -143,6 +148,7 @@ impl MovementController {
             let iter_start = Instant::now();
             let duration_since_start = iter_start - start;
 
+            // TODO check if this is correct
             let average_distance = {
                 let raw_left = left.motor_angle().context("Read left wheel angle")?;
                 let raw_right = right.motor_angle().context("Read right wheel angle")?;
@@ -163,6 +169,8 @@ impl MovementController {
                     (false, true) => adjusted_right.abs(),
                     (false, false) => bail!("Nether wheel has a normal adjusted angle"),
                 };
+
+                // eprintln!("raw_l: {raw_left:.3?}, raw_r: {raw_right:.3?}, combined: {combined:.3}, distance: {distance:.3}");
 
                 combined
             };
@@ -185,15 +193,18 @@ impl MovementController {
 
             // Run PID controller
             let error = math::subtract_angles(target_heading, observered_heading).0;
-            let (pid, _) = pid.update(error);
+            let (pid, _internal) = pid.update(error);
             let correction = pid / 100.0;
+
+            // eprintln!("obs: {observered_heading:5.3?}, tar: {target_heading:5.3?}, pid: {internal:5.3?}, cor: {correction:5.3?}, err: {error:5.3?}");
 
             // Get position on acceleration curve
             let speed_base = acceleration.get_speed(duration_since_start).0;
 
             // Merge corrections with speeds
-            let speed_left = (speed_base + correction * current_max_speed) * ratio_left;
-            let speed_right = (speed_base - correction * current_max_speed) * ratio_right;
+            let speed_left = (speed_base * ratio_left + correction * current_max_speed) * move_left;
+            let speed_right =
+                (speed_base * ratio_right - correction * current_max_speed) * move_right;
 
             // Re-clamp speeds
             let speed_left = f32::clamp(speed_left, -current_max_speed, current_max_speed);

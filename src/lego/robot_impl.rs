@@ -211,11 +211,11 @@ impl Robot for LegoRobot {
         Ok(Percent((current * 10.0 / max).min(1.0).max(0.0)))
     }
 
-    fn await_input(&self) -> Result<Input> {
+    fn await_input(&self, timeout: Option<Duration>) -> Result<Input> {
         wait::wait(
             self.buttons_raw.as_raw_fd(),
             || self.update_button_state(),
-            None,
+            timeout,
         );
 
         Ok(self.input.borrow().clone())
@@ -225,7 +225,7 @@ impl Robot for LegoRobot {
         for motor in self.motors.values() {
             motor
                 .borrow_mut()
-                .motor_reset(None)
+                .motor_reset(Some(StopAction::Coast))
                 .context("Reset motor")?;
         }
         Ok(())

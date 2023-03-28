@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = { version = "1", features = ["backtrace"] }
+anyhow = { version = "1" }
 
 image = { version = "0.24", default-features = false }
 imageproc = { version = "0.23", default-features = false }
@@ -13,3 +13,9 @@ rusttype = "0.9"
 ev3dev-lang-rust = { version = "0.12", features = ["screen"] }
 
 fxhash = "0.2.1"
+
+[dev-dependencies]
+rand = "0.8"
+
+[profile.release]
+strip = true
