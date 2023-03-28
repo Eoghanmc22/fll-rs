@@ -1,7 +1,16 @@
 [package]
 name = "fll-rs"
 version = "0.1.0"
+description = "Movement and ui apis for lego ev3 robots intended for use in the FIRST Lego League competition"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+
+keywords = ["ev3", "ev3dev", "lego", "mindstorms", "fll", "first", "robotics"]
+categories = ["science::robotics", "embedded"]
+
+repository = "https://github.com/Eoghanmc22/fll-rs"
+documentation = "https://docs.rs/fll-rs"
+readme = "README.md"
 
 [dependencies]
 anyhow = { version = "1" }
