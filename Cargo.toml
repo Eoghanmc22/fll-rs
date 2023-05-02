@@ -1,6 +1,6 @@
 [package]
 name = "fll-rs"
-version = "0.1.1"
+version = "0.1.2"
 description = "Movement and ui apis for lego ev3 robots intended for use in the FIRST Lego League competition"
 edition = "2021"
 license = "MIT OR Apache-2.0"

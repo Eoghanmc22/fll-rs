@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "fll-rs"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "ev3dev-lang-rust",
