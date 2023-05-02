@@ -597,7 +597,7 @@ fn reset_gyro_hard(gyro: &mut LegoGyroSensor) -> Result<()> {
                 gyro.gyro = new_gyro;
 
                 // Wait for driver to initalize
-                thread::sleep(Duration::from_millis(300));
+                thread::sleep(Duration::from_millis(500));
 
                 return Ok(());
             }
