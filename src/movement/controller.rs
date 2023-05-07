@@ -87,8 +87,6 @@ impl MovementController {
         ratio: (f32, f32),
         ending_condition: EndingCondition,
     ) -> Result<()> {
-        const INTERVAL: Duration = Duration::from_millis(20);
-
         if distance.0 == 0.0 {
             // Requested movement of 0 deg
             return Ok(());
@@ -134,7 +132,7 @@ impl MovementController {
         );
 
         // Setup the PID controller
-        let mut pid = PidController::new(INTERVAL);
+        let mut pid = PidController::new(self.pid_config);
 
         // Setup motors
         let mut left = robot.motor(MotorId::DriveLeft).context("Left motor")?;
@@ -195,8 +193,8 @@ impl MovementController {
 
             // Run PID controller
             let error = math::subtract_angles(target_heading, observered_heading).0;
-            let pid = pid.update(error, self.pid_config);
-            let correction = pid.corection() / 100.0;
+            let (pid, _internal) = pid.update(error);
+            let correction = pid / 100.0;
 
             // eprintln!("obs: {observered_heading:5.3?}, tar: {target_heading:5.3?}, pid: {internal:5.3?}, cor: {correction:5.3?}, err: {error:5.3?}");
 
@@ -225,7 +223,10 @@ impl MovementController {
             robot.handle_interrupt()?;
 
             // TODO tune
-            thread::sleep(Duration::checked_sub(INTERVAL, iter_start.elapsed()).unwrap_or_default())
+            thread::sleep(
+                Duration::checked_sub(Duration::from_millis(10), iter_start.elapsed())
+                    .unwrap_or_default(),
+            )
         }
 
         // Update state
