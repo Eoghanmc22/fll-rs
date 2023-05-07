@@ -151,6 +151,8 @@ pub trait Robot: AngleProvider {
     /// This function may panic if `speed` is less than or equal to 0
     fn turn_named(&self, angle: Heading, speed: impl Into<Speed>, turn: TurnType) -> Result<()>;
 
+    fn set_heading(&self, angle: Heading) -> Result<()>;
+
     /// Retereives a motor
     fn motor(&self, motor: MotorId) -> Option<RefMut<dyn Motor>>;
 

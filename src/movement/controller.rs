@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 /// The standard implementation of movement
 pub struct MovementController {
     pid_config: PidConfig,
-    target_direction: Heading,
+    pub target_direction: Heading,
 }
 
 impl MovementController {

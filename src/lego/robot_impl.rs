@@ -255,6 +255,11 @@ impl Robot for LegoRobot {
     fn spec(&self) -> &RobotSpec {
         &self.spec
     }
+
+    fn set_heading(&self, angle: Heading) -> Result<()> {
+        self.controller.borrow_mut().target_direction = angle;
+        Ok(())
+    }
 }
 
 impl AngleProvider for LegoRobot {
